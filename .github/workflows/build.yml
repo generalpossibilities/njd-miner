@@ -84,7 +84,11 @@ jobs:
           mv app-release.apk njd-miner.apk
           APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
           echo "using $APKSIGNER"
-          "$APKSIGNER" verify --print-certs njd-miner.apk | grep -E "Signer #1 certificate (DN|SHA-256)" || true
+          CERTS=$("$APKSIGNER" verify --verbose --print-certs njd-miner.apk 2>&1) || true
+          echo "$CERTS"
+          if echo "$CERTS" | grep -q "CN=Android Debug"; then
+            echo "::warning::APK is debug-signed — it will NOT install over release builds. Set the ANDROID_* secrets."
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
