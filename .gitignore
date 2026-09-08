@@ -48,3 +48,11 @@ app.*.map.json
 # The built WASM SDK in assets/bee/pkg/ IS committed so CI builds are
 # self-contained; regenerate it with tool/sync_bee_sdk.sh.
 /bee-engine/
+
+# Android release signing — never commit these. CI writes key.properties from
+# repo secrets; keep your keystore backed up somewhere safe outside git.
+/android/key.properties
+*.jks
+*.keystore
+*.p12
+SECRETS.txt

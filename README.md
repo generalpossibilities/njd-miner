@@ -86,12 +86,12 @@ Built and checked on this machine:
 - ✅ `flutter analyze` is clean; `flutter test` (clock-face formatting) passes.
 - ✅ Confirmed from `bee_miner` source that the miner is single-threaded
   cooperative (no SAB) and that a **tap-less session submits nothing**.
+- ✅ CI `check` + `ios` jobs pass (unsigned `.ipa` builds). `android` job fixed
+  after the first run (Kotlin plugin bump for `package_info_plus`).
 
 Not yet exercised:
 
-- ⛔ The Android / iOS builds — no native SDK on the machine this was written on.
-  Gradle + Xcode config is written; the CI workflow builds both but hasn't run
-  yet. First green run is the real check.
+- ⛔ A signed Android build end-to-end (needs the four `ANDROID_*` repo secrets set).
 - ⛔ The WebView ↔ Dart bridge, the localhost server serving the 9.6 MB wasm,
   the wallet-connect handshake, and mining itself.
 
@@ -108,14 +108,33 @@ Not yet exercised:
 | `ios` | macos-14 | `njd-miner-ios-unsigned` artifact — unsigned `.ipa` |
 | `release` | ubuntu | on a `v*` tag, attaches both to a GitHub Release |
 
-The release APK is currently signed with **debug keys** (see the `TODO` in
-`android/app/build.gradle.kts`). The iOS `.ipa` is **unsigned** — it installs
-only via a resigning sideload tool (AltStore / Sideloadly) or on a jailbroken
-device. For a real signed build, add signing secrets and switch the `ios` job to
-`flutter build ipa --export-options-plist`.
-
 `.github/workflows/refresh-bee-sdk.yml` (manual) rebuilds the WASM SDK from
 upstream and opens a PR — run it when `gosh-sh/bee-engine` ships a change.
+
+### App updates (install-over-the-top)
+
+`--build-number ${{ github.run_number }}` makes every CI build's `versionCode` /
+`CFBundleVersion` strictly increase, so newer builds are recognised as updates.
+
+**Android** also needs a stable signing key. CI writes `android/key.properties`
+from four repo secrets; if they are unset the APK falls back to **debug signing**
+and won't install over a release build.
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 njd-upload-keystore.p12` |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_PASSWORD` | same (PKCS12, one password) |
+| `ANDROID_KEY_ALIAS` | `upload` |
+
+The keystore + the exact `gh secret set` commands are in `SECRETS.txt` (git-ignored).
+**Back up `njd-upload-keystore.p12`** — without it you can never ship an update
+that installs over existing installs.
+
+**iOS**: the `.ipa` is unsigned. AltStore / Sideloadly resign it with *your*
+Apple ID cert (stable), so updates install in place; the version bump above is
+handled. For a properly signed build, add Apple signing secrets and switch the
+`ios` job to `flutter build ipa --export-options-plist`.
 
 ### Local build
 
@@ -157,6 +176,12 @@ Once keys propagate on-chain, tap the clock face to mine.
 | `lib/clock/` | The digital clock UI + status bar + wallet setup sheet. |
 | `lib/widgets/home_widget_bridge.dart` | Pushes time/balance/status to the AppWidget. |
 | `android/.../ClockWidgetProvider.kt` | Home-screen widget (native `TextClock` + last values). |
+
+### App icon
+
+Derived from `logo.jpg` (the notjustdex ND monogram). Source art is
+`assets/icon/`; regenerate the platform icons with
+`dart run flutter_launcher_icons` (config in `pubspec.yaml`).
 
 ### On the clock UI
 

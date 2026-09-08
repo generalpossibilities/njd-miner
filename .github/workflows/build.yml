@@ -53,11 +53,37 @@ jobs:
 
       - run: flutter pub get
 
+      - name: Configure release signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::ANDROID_KEYSTORE_BASE64 not set — APK will be debug-signed and won't update over release builds."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > android/app/upload-keystore.p12
+          cat > android/key.properties <<EOF
+          storeFile=app/upload-keystore.p12
+          storeType=PKCS12
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
       - name: Build APKs
         run: flutter build apk --release --split-per-abi --build-number ${{ github.run_number }}
 
       - name: Build universal APK
         run: flutter build apk --release --build-number ${{ github.run_number }}
+
+      - name: Print APK signer certificate (sanity)
+        if: always()
+        run: |
+          f=$(ls build/app/outputs/flutter-apk/app-arm64-v8a-release.apk 2>/dev/null || ls build/app/outputs/flutter-apk/app-release.apk)
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$f" | grep -E "SHA-256|Signer" || true
 
       - uses: actions/upload-artifact@v4
         with:

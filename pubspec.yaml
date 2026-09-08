@@ -36,6 +36,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
@@ -43,3 +44,15 @@ flutter:
   assets:
     - assets/bee/
     - assets/bee/pkg/
+
+# App icon — regenerate with: dart run flutter_launcher_icons
+# Source art is assets/icon/ (derived from logo.jpg, the notjustdex mark).
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#02020C"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  web:
+    generate: false
