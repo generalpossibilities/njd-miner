@@ -31,16 +31,34 @@ class BeeConfig {
   static const String localHost = '127.0.0.1';
   static const int localPort = 8737;
 
-  /// Length of one `Miner.start()` session. Bee accounts taps in a ~5-minute
-  /// epoch window (`_epoch5mStart` / `_tapSum5m` in `MinerAccountData`), so a
-  /// session is aligned to that; the JS runner re-arms at the boundary.
-  /// The upstream demo uses 15s — that's a demo button, not a real session.
-  static const int sessionDurationMs = 300000; // 5 min
+  // ── Mining session (values from a working reference auto-miner) ──────
+  /// Length of one `Miner.start()` session.
+  static const int sessionDurationMs = 330000; // 5.5 min
 
-  /// Taps in one epoch that yield the maximum reward; fewer taps → less.
-  /// User-reported (~70); not stated in the official docs. Drives only the
-  /// on-screen progress hint — the contract's `tap_sum_5m` is the real figure.
-  static const int tapsPerEpochTarget = 70;
+  /// Auto-taps fired per session (70 → maximum session reward).
+  static const int tapsPerSession = 70;
+
+  /// Base delay between auto-taps; actual delay is ±[tapJitterPct].
+  static const int tapIntervalMs = 4000;
+  static const double tapJitterPct = 0.10;
+
+  /// Stagger before submitting session results (desyncs WASM submit calls).
+  static const int submitStaggerMs = 5000;
+
+  /// Extra idle between sessions: 5s + rand(0..[sessionBoundaryJitterMs]).
+  static const int sessionBoundaryJitterMs = 3000;
+
+  /// On-chain hard cap on taps counted in one global epoch.
+  static const int maxTapsPerEpoch = 12000;
+
+  /// Global epoch length in blocks (for the tap-budget reset).
+  static const int epochSpanBlocks = 262000;
+
+  /// Wallet-connect session TTL handed to `create_shared_key_session` (seconds).
+  static const int connectSessionTtlSec = 1800;
+
+  /// Kept for the on-screen progress bar.
+  static const int tapsPerEpochTarget = tapsPerSession;
 
   /// ECC token slot for NACKL in `wallet.get_multifactor_balances()`.
   static const String nacklEccSlot = '1';

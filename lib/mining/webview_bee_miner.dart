@@ -165,8 +165,15 @@ class WebViewBeeMiner implements BeeMiner {
       'appId': BeeConfig.appDappId,
       'endpoints': BeeConfig.endpoints,
       'apiUrl': BeeConfig.apiUrl,
-      'sessionDurationMs': BeeConfig.sessionDurationMs,
       'nacklEccSlot': BeeConfig.nacklEccSlot,
+      'sessionDurationMs': BeeConfig.sessionDurationMs,
+      'tapsPerSession': BeeConfig.tapsPerSession,
+      'tapIntervalMs': BeeConfig.tapIntervalMs,
+      'tapJitterPct': BeeConfig.tapJitterPct,
+      'submitStaggerMs': BeeConfig.submitStaggerMs,
+      'sessionBoundaryJitterMs': BeeConfig.sessionBoundaryJitterMs,
+      'maxTapsPerEpoch': BeeConfig.maxTapsPerEpoch,
+      'connectSessionTtlSec': BeeConfig.connectSessionTtlSec,
     });
     await _call<void>('window.__BEE_CFG = $cfg; await window.Bee.init();');
   }
@@ -306,18 +313,39 @@ class WebViewBeeMiner implements BeeMiner {
         _set(_state.copyWith(phase: MinerPhase.mining, error: null));
         break;
       case 'mining_stopped':
-        _set(_state.copyWith(phase: MinerPhase.idle));
+        _set(_state.copyWith(phase: MinerPhase.idle, sessionPhase: 'idle'));
         break;
-      case 'session_status':
-        if (raw['status'] == 'computing' || raw['status'] == 'starting') {
-          _set(_state.copyWith(phase: MinerPhase.mining));
-        }
+      case 'session':
+        int i(String k) => (raw[k] as num?)?.toInt() ?? 0;
+        _set(
+          _state.copyWith(
+            phase: MinerPhase.mining,
+            sessionPhase: raw['phase']?.toString(),
+            sessionsCompleted: i('n'),
+            tapsSent: i('tapsSent'),
+            confirmed: i('confirmed'),
+            epochTaps: i('epochTaps'),
+            epochBudget: i('epochBudget'),
+          ),
+        );
+        break;
+      case 'epoch_rolled':
+        _set(_state.copyWith(epochTaps: 0));
+        break;
+      case 'session_event':
+        // computation/submit milestones — informational only for now
         break;
       case 'session_finished':
         _set(
           _state.copyWith(
             sessionsCompleted:
                 (raw['sessions'] as num?)?.toInt() ?? _state.sessionsCompleted,
+            confirmed: (raw['confirmed'] as num?)?.toInt() ?? _state.confirmed,
+            epochTaps: (raw['epochTaps'] as num?)?.toInt() ?? _state.epochTaps,
+            message:
+                raw['empty'] == true
+                    ? 'Last session submitted no taps'
+                    : raw['error']?.toString(),
           ),
         );
         break;

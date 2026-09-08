@@ -35,6 +35,11 @@ class MinerState {
     this.tapSum,
     this.tapSum5m = 0,
     this.epoch5mStart,
+    this.sessionPhase,
+    this.tapsSent = 0,
+    this.confirmed = 0,
+    this.epochTaps = 0,
+    this.epochBudget = 0,
     this.message,
     this.error,
   });
@@ -65,6 +70,20 @@ class MinerState {
   /// `_epoch5mStart` — changes when a new 5-minute epoch begins.
   final String? epoch5mStart;
 
+  /// Current session sub-phase from the auto-tap loop:
+  /// `starting` | `tapping` | `submitting` | `idle` | `waiting`.
+  final String? sessionPhase;
+
+  /// Auto-taps sent in the current/last session.
+  final int tapsSent;
+
+  /// On-chain confirmed taps from the last session (`tap_sum` delta).
+  final int confirmed;
+
+  /// Confirmed taps accumulated in the current global epoch, and the cap.
+  final int epochTaps;
+  final int epochBudget;
+
   final String? message;
   final String? error;
 
@@ -79,6 +98,11 @@ class MinerState {
     String? tapSum,
     int? tapSum5m,
     String? epoch5mStart,
+    String? sessionPhase,
+    int? tapsSent,
+    int? confirmed,
+    int? epochTaps,
+    int? epochBudget,
     String? message,
     Object? error = _sentinel,
   }) {
@@ -94,6 +118,11 @@ class MinerState {
       tapSum: tapSum ?? this.tapSum,
       tapSum5m: tapSum5m ?? this.tapSum5m,
       epoch5mStart: epoch5mStart ?? this.epoch5mStart,
+      sessionPhase: sessionPhase ?? this.sessionPhase,
+      tapsSent: tapsSent ?? this.tapsSent,
+      confirmed: confirmed ?? this.confirmed,
+      epochTaps: epochTaps ?? this.epochTaps,
+      epochBudget: epochBudget ?? this.epochBudget,
       message: message ?? this.message,
       error: identical(error, _sentinel) ? this.error : error as String?,
     );

@@ -44,6 +44,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Reference implementation dropped in for study — NOT part of this project.
+# (Contains node_modules, a keystore, and binaries — never commit.)
+/dexchatsminermulti/
+
 # Bee Engine — the upstream Rust source clone is not vendored here.
 # The built WASM SDK in assets/bee/pkg/ IS committed so CI builds are
 # self-contained; regenerate it with tool/sync_bee_sdk.sh.

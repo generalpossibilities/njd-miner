@@ -42,11 +42,7 @@ class MiningStatusBar extends StatelessWidget {
         Colors.white54,
         Icons.sync,
       ),
-      MinerPhase.idle => (
-        'Idle — tap to mine',
-        Colors.white70,
-        Icons.play_arrow,
-      ),
+      MinerPhase.idle => ('Idle', Colors.white70, Icons.play_arrow),
       MinerPhase.mining => (
         'Mining NACKL',
         const Color(0xFF6BE28B),

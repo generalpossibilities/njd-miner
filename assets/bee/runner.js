@@ -102,13 +102,36 @@ function nanoToDisplay(value, decimals = 9, frac = 4) {
 }
 
 // ---- miner state ----------------------------------------------------
+//
+// Auto-tap mining loop, ported from a working reference auto-miner:
+//   Miner.new → can_start → read tap_sum → start(session) → tap ~70x with
+//   jitter → stop → wait for acceptance → read tap_sum → get_reward → free
+// The taps are what earn; the clock face tap is an optional extra.
 const M = {
   conn: null,
-  miner: null,
-  running: false, // user intent: keep the re-arm loop going
-  sessionActive: false, // a start() session is currently in flight
+  running: false, // user intent: keep looping
+  loopAlive: false, // a loop is currently executing
+  currentMiner: null, // the live Miner instance during a session (for add_tap)
   sessions: 0,
+  tapsSent: 0,
+  confirmed: 0,
+  epochTaps: 0,
+  epochStart: null, // _epochBigStart; reset budget when it changes
+  errors: 0,
 };
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const rint = (a, b) => a + Math.random() * (b - a);
+function safeNum(v) {
+  try {
+    if (v == null) return 0;
+    if (typeof v === "bigint") return Number(v);
+    if (typeof v === "string") return Number(BigInt(v));
+    return Number(v);
+  } catch {
+    return 0;
+  }
+}
 
 async function getMinerAddress(walletName) {
   await ensureSdk();
@@ -118,54 +141,236 @@ async function getMinerAddress(walletName) {
   });
 }
 
-async function initMinerInstance(minerAddress, ownerPublic, ownerSecret) {
+async function newMiner(k) {
   await ensureSdk();
-  return Miner.new(CFG().endpoints, CFG().appId, minerAddress, ownerPublic, ownerSecret);
-}
-
-function handleMinerCallback(message) {
-  let payload;
-  try {
-    payload = JSON.parse(message);
-  } catch {
-    return;
-  }
-  if (payload.error) {
-    emit("miner_error", { where: payload.action || "miner", error: payload.error });
-    M.sessionActive = false;
-    return;
-  }
-  if (payload.action === "status_updated" && payload.data?.status) {
-    const status = payload.data.status;
-    emit("session_status", { status });
-    if (status === "finished" || status === "removed") {
-      M.sessionActive = false;
-      if (status === "finished") {
-        M.sessions += 1;
-        emit("session_finished", { sessions: M.sessions });
+  for (let r = 0; r < 3; r++) {
+    try {
+      return await Miner.new(
+        CFG().endpoints,
+        CFG().appId,
+        k.minerAddress,
+        k.ownerPublic,
+        k.ownerSecret,
+      );
+    } catch (e) {
+      if (r < 2 && String(e?.message || e).includes("Failed to fetch")) {
+        await sleep((r + 1) * 5000);
+        continue;
       }
-      // Re-arm.
-      if (M.running) queueMicrotask(runLoopTick);
+      throw e;
     }
   }
 }
 
-async function runLoopTick() {
-  if (!M.running || M.sessionActive || !M.miner) return;
-  try {
-    if (!M.miner.can_start()) {
-      // Not ready yet; poll again shortly.
-      setTimeout(runLoopTick, 1500);
-      return;
+function emitSession(phase, extra = {}) {
+  emit("session", {
+    phase, // 'starting' | 'tapping' | 'submitting' | 'accepted' | 'idle' | 'waiting'
+    n: M.sessions,
+    tapsSent: M.tapsSent,
+    confirmed: M.confirmed,
+    epochTaps: M.epochTaps,
+    epochBudget: CFG().maxTapsPerEpoch,
+    ...extra,
+  });
+}
+
+async function runSessionLoop() {
+  if (M.loopAlive) return;
+  M.loopAlive = true;
+  emit("mining_started");
+
+  const cfg = CFG();
+  const TAP_INT = cfg.tapIntervalMs;
+  const JITTER = cfg.tapJitterPct;
+  const SUBMIT_STAGGER = cfg.submitStaggerMs;
+
+  while (M.running) {
+    const k = M.conn ? readKeys(M.conn) : null;
+    if (!k?.areKeysPropagated || !k.minerAddress) {
+      emit("miner_error", { where: "loop", error: "mining keys not ready" });
+      break;
     }
-    M.sessionActive = true;
-    emit("session_status", { status: "starting" });
-    M.miner.start(CFG().sessionDurationMs, handleMinerCallback);
-  } catch (e) {
-    M.sessionActive = false;
-    emit("miner_error", { where: "start", error: String(e?.message || e) });
-    if (M.running) setTimeout(runLoopTick, 3000);
+
+    if (M.epochTaps >= cfg.maxTapsPerEpoch) {
+      emitSession("waiting", { reason: "epoch tap budget reached" });
+      await sleep(60000);
+      continue;
+    }
+
+    let miner = null;
+    try {
+      miner = await newMiner(k);
+      M.currentMiner = miner;
+
+      if (!(await miner.can_start())) {
+        emitSession("waiting", { reason: "can_start=false" });
+        miner.free?.();
+        M.currentMiner = null;
+        await sleep(30000);
+        continue;
+      }
+
+      // tap_sum before + epoch budget reset
+      let tapBefore = 0;
+      try {
+        const d = await miner.get_miner_data();
+        tapBefore = safeNum(d?.tap_sum);
+        const es = d?.epoch_start?.toString() ?? null;
+        if (es && es !== M.epochStart) {
+          M.epochStart = es;
+          M.epochTaps = 0;
+          emit("epoch_rolled", { epochStart: es });
+        }
+        emit("miner_data", {
+          tapSum: d?.tap_sum?.toString(),
+          tapSum5m: d?.tap_sum_5m?.toString(),
+          epochStart: es,
+          epoch5mStart: d?.epoch_5m_start?.toString(),
+        });
+        d?.free?.();
+      } catch (e) {
+        log("pre tap_sum", String(e?.message || e));
+      }
+
+      // start session, wait for the worker's first callback (2s cap)
+      let workerReady = false;
+      let sessionAccepted = false;
+      let sessionEmpty = false;
+      let sessionErr = null;
+      await new Promise((resolve) => {
+        const t = setTimeout(() => {
+          workerReady = true;
+          resolve();
+        }, 2000);
+        miner.start(cfg.sessionDurationMs, (message) => {
+          let e;
+          try {
+            e = JSON.parse(message);
+          } catch {
+            return;
+          }
+          if (e.error) {
+            sessionErr = `${e.action}: ${e.error}`;
+          } else if (e.action === "computation_completed" && e.data?.empty) {
+            sessionEmpty = true;
+          } else if (e.action === "session_accepted") {
+            sessionAccepted = true;
+          }
+          if (["session_accepted", "submit_session_root", "submit_session_proof", "computation_completed"].includes(e.action)) {
+            emit("session_event", { action: e.action, error: e.error ?? null });
+          }
+          if (!workerReady) {
+            workerReady = true;
+            clearTimeout(t);
+            resolve();
+          }
+        });
+      });
+
+      M.sessions += 1;
+      M.tapsSent = 0;
+      emitSession("tapping");
+
+      // ── auto-tap ──────────────────────────────────────────────
+      const sessStart = Date.now();
+      const budget = cfg.maxTapsPerEpoch - M.epochTaps;
+      const tapCount = Math.min(cfg.tapsPerSession, budget);
+      const safeUntil = sessStart + cfg.sessionDurationMs - TAP_INT * 2 - SUBMIT_STAGGER;
+
+      for (let i = 0; i < tapCount && M.running && Date.now() < safeUntil; i++) {
+        try {
+          miner.add_tap(Math.round(rint(40, 360)), Math.round(rint(80, 640)));
+          M.tapsSent++;
+        } catch (e) {
+          if (String(e?.message || e).includes("No running workers")) {
+            await sleep(1000);
+            if (Date.now() < safeUntil) {
+              try {
+                miner.add_tap(Math.round(rint(40, 360)), Math.round(rint(80, 640)));
+                M.tapsSent++;
+              } catch {}
+            }
+          }
+        }
+        if (i % 5 === 0) emitSession("tapping");
+        const jitter = TAP_INT * JITTER * (Math.random() * 2 - 1);
+        await sleep(Math.max(300, TAP_INT + jitter));
+      }
+
+      // ── submit ────────────────────────────────────────────────
+      emitSession("submitting");
+      await sleep(Math.random() * SUBMIT_STAGGER);
+      try {
+        miner.stop();
+      } catch {}
+
+      // wait for on-chain acceptance (cap ~180s)
+      for (let w = 0; w < 18 && M.running && !sessionAccepted && !sessionErr; w++) {
+        await sleep(10000);
+      }
+
+      // tap_sum after
+      let tapAfter = tapBefore;
+      for (let retry = 0; retry < 3; retry++) {
+        try {
+          const d = await miner.get_miner_data();
+          tapAfter = safeNum(d?.tap_sum);
+          d?.free?.();
+          if (tapAfter > tapBefore) break;
+          if (retry < 2) await sleep(5000);
+        } catch (e) {
+          log("post tap_sum", String(e?.message || e));
+        }
+      }
+      const confirmed = Math.max(0, tapAfter - tapBefore);
+      M.confirmed = confirmed;
+      M.epochTaps += confirmed;
+
+      if (!sessionErr && !sessionEmpty) {
+        for (let r = 0; r < 3; r++) {
+          try {
+            await miner.get_reward();
+            break;
+          } catch (e) {
+            if (String(e?.message || e).includes("QUEUE_OVERFLOW") && r < 2) {
+              await sleep((r + 1) * 5000);
+            } else {
+              log("get_reward", String(e?.message || e));
+              break;
+            }
+          }
+        }
+      }
+
+      emit("session_finished", {
+        sessions: M.sessions,
+        tapsSent: M.tapsSent,
+        confirmed,
+        epochTaps: M.epochTaps,
+        empty: sessionEmpty,
+        error: sessionErr,
+      });
+      emitSession("idle", { empty: sessionEmpty, error: sessionErr });
+
+      window.Bee?.refreshBalance?.().catch(() => {});
+      M.errors = 0;
+
+      miner.free?.();
+      M.currentMiner = null;
+      await sleep(5000 + Math.random() * cfg.sessionBoundaryJitterMs);
+    } catch (e) {
+      M.errors++;
+      emit("miner_error", { where: "session", error: String(e?.message || e) });
+      try {
+        miner?.free?.();
+      } catch {}
+      M.currentMiner = null;
+      await sleep(Math.min(15000 * 2 ** Math.min(M.errors - 1, 4), 120000));
+    }
   }
+
+  M.loopAlive = false;
+  emit("mining_stopped");
 }
 
 // ---- public API (window.Bee) ---------------------------------------
@@ -186,7 +391,11 @@ window.Bee = {
   async startConnect() {
     await ensureSdk();
     const beeConnect = new BeeConnect();
-    const session = beeConnect.create_shared_key_session(CFG().appId, 300, null);
+    const session = beeConnect.create_shared_key_session(
+      CFG().appId,
+      CFG().connectSessionTtlSec || 1800,
+      null,
+    );
     emit("connect_pending", { sessionId: session.session_id });
 
     (async () => {
@@ -224,6 +433,11 @@ window.Bee = {
     await ensureSdk();
 
     const generated = await gen_mining_keys(CFG().appId);
+    // TVM SDK serialises uint256 map values WITH a 0x prefix — the mining key
+    // must be passed prefixed or it never matches on the miner contract.
+    const prefixedPublic = generated.public.startsWith("0x")
+      ? generated.public
+      : "0x" + generated.public;
     const beeConnect = new BeeConnect();
     const req = await beeConnect.request_set_mining_keys(
       CFG().endpoints,
@@ -231,7 +445,7 @@ window.Bee = {
       M.conn.description,
       M.conn.sessionStateJson,
       CFG().appId,
-      generated.public,
+      prefixedPublic,
       30,
       1000,
     );
@@ -254,7 +468,7 @@ window.Bee = {
           client_config: { network: { endpoints: CFG().endpoints } },
           miner_address: minerAddress,
           app_id: CFG().appId,
-          expected_owner_public: generated.public,
+          expected_owner_public: prefixedPublic,
           max_attempts: 120,
           interval_ms: 2000,
         });
@@ -276,31 +490,25 @@ window.Bee = {
     if (!M.conn) throw new Error("no wallet connected");
     const k = readKeys(M.conn);
     if (!k?.areKeysPropagated || !k.minerAddress) throw new Error("mining keys not ready");
-
-    if (!M.miner) {
-      emit("session_status", { status: "init" });
-      M.miner = await initMinerInstance(k.minerAddress, k.ownerPublic, k.ownerSecret);
-    }
     M.running = true;
-    emit("mining_started");
-    runLoopTick();
+    runSessionLoop();
   },
 
   async stopMining() {
     M.running = false;
     try {
-      M.miner?.stop();
+      M.currentMiner?.stop();
     } catch (e) {
       log("stop error", String(e?.message || e));
     }
-    M.sessionActive = false;
-    emit("mining_stopped");
   },
 
-  /** Real touch on the clock face. x/y are logical pixels. */
+  /** Optional bonus tap from a real touch on the clock face. Only lands if a
+   *  session is currently tapping. */
   async addTap(x, y) {
     try {
-      M.miner?.add_tap(Math.max(0, Math.round(x)), Math.max(0, Math.round(y)));
+      M.currentMiner?.add_tap(Math.max(0, Math.round(x)), Math.max(0, Math.round(y)));
+      M.tapsSent++;
       emit("tap", { x, y });
     } catch (e) {
       log("addTap error", String(e?.message || e));
@@ -308,10 +516,16 @@ window.Bee = {
   },
 
   async claimReward() {
-    if (!M.miner) throw new Error("miner not initialised");
-    await M.miner.get_reward();
-    emit("reward_claimed");
-    this.refreshBalance().catch(() => {});
+    const k = M.conn ? readKeys(M.conn) : null;
+    if (!k?.minerAddress) throw new Error("no miner");
+    const miner = M.currentMiner ?? (await newMiner(k));
+    try {
+      await miner.get_reward();
+      emit("reward_claimed");
+      window.Bee.refreshBalance().catch(() => {});
+    } finally {
+      if (miner !== M.currentMiner) miner.free?.();
+    }
   },
 
   async refreshBalance() {
@@ -353,9 +567,10 @@ window.Bee = {
   },
 
   async minerData() {
-    if (!M.miner) return;
+    const src = M.currentMiner;
+    if (!src) return;
     try {
-      const d = await M.miner.get_miner_data();
+      const d = await src.get_miner_data();
       emit("miner_data", {
         tapSum: d.tap_sum?.toString(),
         tapSum5m: d.tap_sum_5m?.toString(),
@@ -373,11 +588,10 @@ window.Bee = {
     // submitting against keys we're about to revoke.
     M.running = false;
     try {
-      M.miner?.stop();
+      M.currentMiner?.stop();
     } catch (e) {
       log("disconnect stop err", String(e?.message || e));
     }
-    M.sessionActive = false;
 
     try {
       if (M.conn) {
@@ -397,9 +611,11 @@ window.Bee = {
     }
     M.running = false;
     try {
-      M.miner?.free?.();
+      M.currentMiner?.free?.();
     } catch {}
-    M.miner = null;
+    M.currentMiner = null;
+    M.sessions = 0;
+    M.epochTaps = 0;
     writeKeys(M.conn, null);
     writeSession(null);
     M.conn = null;

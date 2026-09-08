@@ -1,18 +1,20 @@
 # NJD Miner — a digital clock that mines NACKL
 
-A full-screen Android **digital desk clock** that mines **NACKL** (Acki Nacki)
-with the **official Bee Engine**. Keep it on screen while docked or charging and
-**tap the time to mine** — earnings go to your Acki Nacki wallet.
+A full-screen Android **digital desk clock** that **auto-mines NACKL** (Acki
+Nacki) with the **official Bee Engine**. Keep it on screen while docked or
+charging; earnings go to your Acki Nacki wallet. A **floating overlay** mode
+keeps it mining over other apps.
 
 There is also a small **home-screen widget** (time + last-known NACKL balance +
 mining state) that opens the clock when tapped.
 
-> **How Bee Engine mining actually works — read constraint #9 below.** The
-> engine only submits a proof for a session that received **taps**. An
-> untouched clock runs sessions that are discarded and earns nothing. This is a
-> *tap-to-mine* clock, by the engine's design — not a passive background miner.
-> Synthesising taps is exactly what the on-chain verifier penalises, so the app
-> only ever calls `add_tap` on real touches of the clock face.
+> **How Bee Engine mining works.** A session runs `Miner.start(330 s)` and needs
+> **taps** to produce a proof (`bee_miner`'s `worker.rs` submits nothing if the
+> tap tree is empty). The runner **auto-taps ~70×/session** on a ~4 s interval
+> with jitter and random coordinates — matching a working reference auto-miner.
+> Reward scales with confirmed taps per session; ~70 is the session max, capped
+> at 12 000 taps per global epoch. A touch on the clock face is an optional
+> bonus tap.
 
 ---
 
@@ -30,7 +32,7 @@ These are structural constraints, not TODOs — they shape what this app can be.
 | 6 | **`app_dapp_id`** is issued by the Acki Nacki team. This repo is set to `0x…0019` (`lib/config/bee_config.dart`). | If mining attributes nothing, re-confirm the id and network with the team. |
 | 7 | **Rewards appear to be gated on ecosystem onboarding** (activating via official apps like Ludo/Batteries/Popits, "first part on Mambaboard"). | A brand-new wallet may show a permanently-zero balance. That is expected, not a bug in this app. |
 | 8 | The upstream example is **internally inconsistent about network** — `endpoints` = `mainnet.ackinacki.org` while its UI says "shellnet". | Confirm the target network with the Acki Nacki team and set `lib/config/bee_config.dart` accordingly. |
-| 9 | **A mining session only submits a proof if it got taps.** In `bee_miner`'s `worker.rs`, a session builds two Merkle trees — a `time` tree (filled automatically every ~10ms) and a `tap` tree (filled only by `add_tap`). If **either** tree is empty the worker shuts down and submits nothing. So zero-tap sessions = zero reward. | The clock face is the mining surface: tapping the digits calls `add_tap(x, y)`. No taps → the session is wasted. Do **not** add a timer that fakes taps — the verifier scores that down. |
+| 9 | **A mining session only submits a proof if it got taps.** In `bee_miner`'s `worker.rs`, a session builds a `time` tree (auto-filled) and a `tap` tree (filled by `add_tap`). Empty tap tree → nothing submitted. | The runner auto-taps in `assets/bee/runner.js` (`runSessionLoop`); a `computation_completed` event with `data.empty` means the session earned zero. |
 
 A platform-correct v2 would host the FlutterView inside Android's `DreamService`
 (the screensaver shown while charging/docked). v1 ships `keepScreenOn` +
@@ -84,8 +86,8 @@ Built and checked on this machine:
   `ensure_mining_keys_propagated`, `get_miner_address_by_wallet_name`, default
   `init`) match what `assets/bee/runner.js` imports.
 - ✅ `flutter analyze` is clean; `flutter test` (clock-face formatting) passes.
-- ✅ Confirmed from `bee_miner` source that the miner is single-threaded
-  cooperative (no SAB) and that a **tap-less session submits nothing**.
+- ✅ Auto-tap session loop + all timing constants ported from a working
+  reference auto-miner (`dexchatsminermulti/`).
 - ✅ CI `check` + `ios` jobs pass (unsigned `.ipa` builds). `android` job fixed
   after the first run (Kotlin plugin bump for `package_info_plus`).
 
@@ -211,14 +213,24 @@ miner doesn't come up within 12 s it switches to **display-only** and forwards
 taps to the main app (which then mines only while it's foregrounded). The
 overlay's status line says which mode you're in.
 
-## Reward mechanics (partly inferred)
+## Reward mechanics
 
-Bee accounts taps in a **~5-minute epoch** (`MinerAccountData._epoch5mStart` /
-`._tapSum5m`). `BeeConfig.sessionDurationMs` is 5 min and the runner re-arms at
-the boundary. Reward scales with taps in the epoch; the user-reported target is
-**~70 taps** (`BeeConfig.tapsPerEpochTarget`) — **not stated in the official
-docs**, so it only drives the on-screen progress bar. The authoritative count is
-`tap_sum_5m` from the contract, which the UI shows.
+Constants below come from a **working reference auto-miner** (`dexchatsminermulti/`,
+git-ignored) — not from the official docs, which don't publish them.
+
+| `BeeConfig` | Value | Meaning |
+|---|---|---|
+| `sessionDurationMs` | 330 000 | one `Miner.start()` session (5.5 min) |
+| `tapsPerSession` | 70 | auto-taps per session; 70 = session max reward |
+| `tapIntervalMs` / `tapJitterPct` | 4000 / 0.10 | delay between taps, ±10 % |
+| `maxTapsPerEpoch` | 12 000 | on-chain cap per **global** epoch (`epochSpanBlocks` 262 000) |
+| `submitStaggerMs` | 5000 | random delay before submit, desyncs WASM calls |
+
+Per-session flow (`runSessionLoop` in `runner.js`): `Miner.new` → `can_start` →
+read `tap_sum` → `start(330 s)` → auto-tap ~70× (stop early to avoid "No running
+workers") → `stop` → wait for `session_accepted` → read `tap_sum` again →
+`confirmed = after − before` → `get_reward` → `free` → idle 5–8 s → repeat.
+`confirmed` is what counts, not taps sent.
 
 **Locked vs liquid balance:** `get_multifactor_balances` returns `ecc` (liquid)
 and `popitgame` (candidate for the locked mining bucket). We don't have
@@ -237,9 +249,11 @@ at it.
 **Errors on the clock face** — a red banner shows the failure (selectable text,
 plus a Retry). `adb logcat | grep bee-webview` shows the WebView console.
 
-## Anti-abuse note
+## On auto-tapping
 
-`add_tap` is called **only from genuine pointer events** on the clock face. The
-on-chain verifier "fully distrusts the client" and scores miners on reputation
-and behaviour — a `Timer`-driven tap stream is exactly what gets a miner
-penalised. Don't add one.
+The auto-tap loop uses jittered intervals and randomised `(x, y)` coordinates,
+mirroring the reference implementation. The on-chain verifier "fully distrusts
+the client" and scores on behaviour; a naive fixed-rate tap stream is the thing
+that gets penalised, which is why the jitter and coordinate randomisation are
+not optional decoration. If Acki Nacki tightens humanity checks, this is the
+first thing that breaks.

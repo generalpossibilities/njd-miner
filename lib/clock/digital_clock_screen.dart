@@ -13,11 +13,10 @@ import 'clock_face.dart';
 import 'mining_status_bar.dart';
 import 'wallet_sheet.dart';
 
-/// Full-screen desk-clock and the mining surface. The hidden Bee WebView only
-/// runs while this activity is visible, and — by the engine's design — a mining
-/// session only counts if it received taps (see README constraint #9). So the
-/// clock face is a tap target: every touch is a real `add_tap`, and an
-/// untouched clock is just a clock.
+/// Full-screen desk-clock. Mining is automatic — the Bee runner fires ~70
+/// taps per 5.5-minute session on its own. The hidden Bee WebView only runs
+/// while this activity (or the floating overlay) is visible, so the clock has
+/// to stay on screen. A touch on the clock face is an optional bonus tap.
 class DigitalClockScreen extends StatefulWidget {
   const DigitalClockScreen({
     super.key,
@@ -38,7 +37,6 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
   MinerState _miner = MinerState.initial;
   StreamSubscription<MinerState>? _sub;
 
-  int _tapsThisRun = 0;
   Offset? _lastTapAt;
   DateTime _lastTapTime = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -59,18 +57,11 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
       final wasSettingUp =
           _miner.phase == MinerPhase.propagatingKeys ||
           _miner.phase == MinerPhase.needsMiningKeys;
-      // A new ~5-minute epoch → local tap counter restarts. (The authoritative
-      // count is s.tapSum5m from the contract; this is just for feel.)
-      final epochRolled =
-          s.epoch5mStart != null && s.epoch5mStart != _miner.epoch5mStart;
-      setState(() {
-        _miner = s;
-        if (epochRolled) _tapsThisRun = 0;
-      });
+      setState(() => _miner = s);
       HomeWidgetBridge.update(s);
       MiningForegroundService.updateStatus(status: _notificationText(s));
 
-      // Keys just finished propagating → arm the miner so the first tap counts.
+      // Keys just propagated → auto-mining kicks off.
       if (wasSettingUp && s.phase == MinerPhase.idle) {
         widget.miner.startMining();
       }
@@ -107,7 +98,8 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
   String _notificationText(MinerState s) {
     final bal = s.gameBalance ?? s.nacklBalance ?? '—';
     return switch (s.phase) {
-      MinerPhase.mining => 'Mining · tap the clock · $bal NACKL',
+      MinerPhase.mining =>
+        'Mining · session ${s.sessionsCompleted} · $bal NACKL',
       MinerPhase.idle => 'Idle · $bal NACKL',
       MinerPhase.needsWallet => 'Tap to connect your Acki Nacki wallet',
       MinerPhase.crashed => 'Miner stopped — open the app',
@@ -138,22 +130,19 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
     );
   }
 
-  /// A genuine touch on the clock face — the one legitimate `add_tap` hook.
-  /// First tap also kick-starts mining if we're idle; taps are what make a
-  /// session count.
+  /// Mining is automatic (the runner auto-taps ~70×/session). A touch on the
+  /// clock face is just a bonus tap that lands if a session is tapping right
+  /// now — and the way into setup when no wallet is connected.
   void _onFaceTap(TapUpDetails d) {
     if (_miner.phase == MinerPhase.needsWallet ||
-        _miner.phase == MinerPhase.needsMiningKeys) {
+        _miner.phase == MinerPhase.needsMiningKeys ||
+        _miner.phase == MinerPhase.crashed) {
       _openWalletSheet();
       return;
-    }
-    if (_miner.phase == MinerPhase.idle) {
-      widget.miner.startMining();
     }
     widget.miner.addTap(d.localPosition.dx, d.localPosition.dy);
     HapticFeedback.selectionClick();
     setState(() {
-      _tapsThisRun++;
       _lastTapAt = d.localPosition;
       _lastTapTime = DateTime.now();
     });
@@ -211,16 +200,9 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
                   onRetry: () => widget.miner.reload(),
                 ),
               if (widget.overlay.overlayOwnsMining)
-                _TapProgress(
-                  taps: widget.overlay.overlayTaps,
-                  target: BeeConfig.tapsPerEpochTarget,
-                  label: 'floating clock is mining',
-                )
+                _SessionStatus.overlay(taps: widget.overlay.overlayTaps)
               else if (_miner.isMining || _miner.phase == MinerPhase.idle)
-                _TapProgress(
-                  taps: _miner.tapSum5m > 0 ? _miner.tapSum5m : _tapsThisRun,
-                  target: BeeConfig.tapsPerEpochTarget,
-                ),
+                _SessionStatus(state: _miner),
               MiningStatusBar(
                 state: _miner,
                 onConnectWallet: _openWalletSheet,
@@ -240,33 +222,60 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
   }
 }
 
-/// "43 / 70 taps this epoch" + a thin progress bar. Reward scales with taps in
-/// the ~5-minute epoch; hitting the target is the max.
-class _TapProgress extends StatelessWidget {
-  const _TapProgress({required this.taps, required this.target, this.label});
+/// Auto-mining session status: which phase, taps this session, confirmed,
+/// epoch budget used. Mining is automatic — this reports it, doesn't ask for
+/// input.
+class _SessionStatus extends StatelessWidget {
+  const _SessionStatus({required this.state}) : overlayTaps = null;
+  const _SessionStatus.overlay({required int taps})
+    : state = null,
+      overlayTaps = taps;
 
-  final int taps;
-  final int target;
-  final String? label;
+  final MinerState? state;
+  final int? overlayTaps;
 
   @override
   Widget build(BuildContext context) {
-    final frac = (taps / target).clamp(0.0, 1.0);
-    final done = taps >= target;
+    if (overlayTaps != null) {
+      return _wrap(
+        'Floating clock mining · $overlayTaps taps',
+        (overlayTaps! / BeeConfig.tapsPerSession).clamp(0.0, 1.0),
+        const Color(0xFF6BE28B),
+      );
+    }
+    final s = state!;
+    final phase = switch (s.sessionPhase) {
+      'starting' => 'starting session',
+      'tapping' => 'mining',
+      'submitting' => 'submitting proof',
+      'waiting' => 'waiting',
+      _ => s.phase == MinerPhase.mining ? 'mining' : 'idle',
+    };
+    final line = StringBuffer('Session ${s.sessionsCompleted} · $phase');
+    if (s.sessionPhase == 'tapping') {
+      line.write(' · ${s.tapsSent}/${BeeConfig.tapsPerSession} taps');
+    } else if (s.confirmed > 0) {
+      line.write(' · +${s.confirmed} confirmed');
+    }
+    if (s.epochBudget > 0) {
+      line.write(' · epoch ${s.epochTaps}/${s.epochBudget}');
+    }
+    final frac =
+        s.sessionPhase == 'tapping'
+            ? (s.tapsSent / BeeConfig.tapsPerSession).clamp(0.0, 1.0)
+            : null;
+    return _wrap(line.toString(), frac, const Color(0xFFFFC531));
+  }
+
+  Widget _wrap(String text, double? frac, Color bar) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
         children: [
           Text(
-            label != null
-                ? '$label · $taps taps this epoch'
-                : taps == 0
-                ? 'Tap the time to mine'
-                : '$taps taps this epoch',
-            style: TextStyle(
-              color: done ? const Color(0xFF6BE28B) : Colors.white38,
-              fontSize: 12,
-            ),
+            text,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 6),
           ClipRRect(
@@ -275,9 +284,7 @@ class _TapProgress extends StatelessWidget {
               value: frac,
               minHeight: 3,
               backgroundColor: Colors.white12,
-              valueColor: AlwaysStoppedAnimation(
-                done ? const Color(0xFF6BE28B) : const Color(0xFFFFC531),
-              ),
+              valueColor: AlwaysStoppedAnimation(bar),
             ),
           ),
         ],
