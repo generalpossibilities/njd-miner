@@ -1,0 +1,123 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.29.0
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  android:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the Bee Engine WASM is committed
+        run: |
+          test -f assets/bee/pkg/bee_sdk.js && test -f assets/bee/pkg/bee_sdk_bg.wasm \
+            || { echo "::error::assets/bee/pkg/ is missing the built SDK — run tool/sync_bee_sdk.sh and commit it"; exit 1; }
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build APKs
+        run: flutter build apk --release --split-per-abi --build-number ${{ github.run_number }}
+
+      - name: Build universal APK
+        run: flutter build apk --release --build-number ${{ github.run_number }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: njd-miner-apk
+          path: build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+
+  ios:
+    needs: check
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the Bee Engine WASM is committed
+        run: |
+          test -f assets/bee/pkg/bee_sdk.js && test -f assets/bee/pkg/bee_sdk_bg.wasm \
+            || { echo "::error::assets/bee/pkg/ is missing the built SDK"; exit 1; }
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # Unsigned build — no Apple Developer account / provisioning profile needed.
+      # The resulting .ipa installs only on jailbroken devices or via a resigning
+      # tool (AltStore, Sideloadly). Add signing secrets + `flutter build ipa
+      # --export-options-plist` for a distributable build.
+      - name: Build iOS (no codesign)
+        run: flutter build ios --release --no-codesign --build-number ${{ github.run_number }}
+
+      - name: Package unsigned IPA
+        run: |
+          cd build/ios/iphoneos
+          mkdir Payload
+          cp -R Runner.app Payload/Runner.app
+          zip -qr njd-miner-unsigned.ipa Payload
+          rm -rf Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: njd-miner-ios-unsigned
+          path: build/ios/iphoneos/njd-miner-unsigned.ipa
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

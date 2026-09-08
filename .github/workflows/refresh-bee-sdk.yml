@@ -1,0 +1,53 @@
+name: refresh-bee-sdk
+
+# Rebuilds the Bee Engine WASM SDK from upstream and opens a PR with the
+# updated assets/bee/pkg/. Manual only — the SDK changes rarely and the build
+# is slow (wasm-opt on a ~13 MB module).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'gosh-sh/bee-engine git ref to build'
+        default: main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM 21 (blst wasm needs a modern clang)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21
+          echo "CC=clang-21" >> "$GITHUB_ENV"
+          echo "AR=llvm-ar-21" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack + cargo-component
+        run: |
+          curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+          cargo install cargo-component --locked
+
+      - name: Clone bee-engine
+        run: git clone --depth 1 --branch "${{ inputs.ref }}" https://github.com/gosh-sh/bee-engine.git ../bee-engine
+
+      - name: Build + sync
+        run: tool/sync_bee_sdk.sh ../bee-engine
+
+      - uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/refresh-bee-sdk
+          title: 'chore: refresh Bee Engine WASM SDK'
+          commit-message: 'chore: refresh Bee Engine WASM SDK from ${{ inputs.ref }}'
+          body: |
+            Rebuilt `assets/bee/pkg/` from `gosh-sh/bee-engine@${{ inputs.ref }}`.
+            Review the wasm/js diff and check the APK still builds before merging.
+          add-paths: assets/bee/pkg

@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NJD Miner — Bee Engine host</title>
+    <style>
+      html, body { margin: 0; background: #000; color: #444; font: 12px monospace; }
+      pre { padding: 8px; white-space: pre-wrap; word-break: break-all; }
+    </style>
+  </head>
+  <body>
+    <!--
+      This page is never shown to the user. It runs inside a 1x1, offstage
+      InAppWebView and exists only to host the Bee Engine WASM SDK.
+
+      `runner.js` loads ./pkg/bee_sdk.js (the wasm-pack `--target web` output)
+      and exposes `window.Bee` for the Dart side to call. See README.md.
+    -->
+    <pre id="log">bee host booting…</pre>
+    <script type="module" src="./runner.js"></script>
+  </body>
+</html>

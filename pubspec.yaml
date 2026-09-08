@@ -1,0 +1,45 @@
+name: njd_miner
+description: "Digital clock widget for Android that mines NACKL (Acki Nacki) with the official Bee Engine while it is on screen."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Hidden WebView that hosts the Bee Engine WASM SDK (@teamgosh/bee-sdk).
+  flutter_inappwebview: ^6.1.5
+
+  # Foreground service: keeps the process at foreground priority + shows the
+  # persistent notification. It does NOT host the miner (see lib/mining/).
+  flutter_foreground_task: ^8.10.0
+
+  # Keep the screen awake while the clock is docked and mining.
+  wakelock_plus: ^1.2.8
+
+  # Home-screen AppWidget bridge (time + NACKL balance + mining state).
+  home_widget: ^0.6.0
+
+  # Wallet connect: render the AN Wallet deep link as a QR code.
+  qr_flutter: ^4.1.0
+
+  # Open the AN Wallet deep link when the phone is the one scanning.
+  url_launcher: ^6.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/bee/
+    - assets/bee/pkg/

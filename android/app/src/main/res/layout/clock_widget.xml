@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="12dp"
+    android:background="@drawable/widget_bg"
+    tools:ignore="HardcodedText">
+
+    <TextClock
+        android:id="@+id/widget_time"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:format12Hour="hh:mm"
+        android:format24Hour="HH:mm"
+        android:textColor="#FFFFFF"
+        android:textSize="40sp"
+        android:fontFamily="sans-serif-thin" />
+
+    <TextView
+        android:id="@+id/widget_balance"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:text="— NACKL" />
+
+    <TextView
+        android:id="@+id/widget_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="#FFC531"
+        android:textSize="11sp"
+        android:letterSpacing="0.08"
+        android:text="idle" />
+</LinearLayout>
