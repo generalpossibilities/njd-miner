@@ -206,6 +206,12 @@ class WebViewBeeMiner implements BeeMiner {
       _call<void>('await window.Bee.refreshBalance();');
 
   @override
+  Future<void> disconnect() async {
+    _stopPolling();
+    await _call<void>('await window.Bee.disconnect();');
+  }
+
+  @override
   Future<void> reload() async {
     _lastConsoleError = null;
     if (!_webViewReady.isCompleted) {
@@ -306,10 +312,24 @@ class WebViewBeeMiner implements BeeMiner {
         );
         break;
       case 'balance':
-        _set(_state.copyWith(nacklBalance: raw['nackl']?.toString()));
+        _set(
+          _state.copyWith(
+            nacklBalance: raw['liquid']?.toString(),
+            gameBalance: raw['game']?.toString(),
+            balanceDebug: raw['raw'] == null ? null : jsonEncode(raw['raw']),
+          ),
+        );
         break;
       case 'miner_data':
-        _set(_state.copyWith(tapSum: raw['tapSum']?.toString()));
+        _set(
+          _state.copyWith(
+            tapSum: raw['tapSum']?.toString(),
+            tapSum5m:
+                int.tryParse(raw['tapSum5m']?.toString() ?? '') ??
+                _state.tapSum5m,
+            epoch5mStart: raw['epoch5mStart']?.toString(),
+          ),
+        );
         break;
       case 'reward_claimed':
         _set(_state.copyWith(message: 'Reward claimed'));

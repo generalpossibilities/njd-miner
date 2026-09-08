@@ -16,7 +16,7 @@ class HomeWidgetBridge {
   static Future<void> update(MinerState state) async {
     await HomeWidget.saveWidgetData<String>(
       'nackl_balance',
-      state.nacklBalance ?? '—',
+      state.gameBalance ?? state.nacklBalance ?? '—',
     );
     await HomeWidget.saveWidgetData<String>('mining_status', switch (state
         .phase) {

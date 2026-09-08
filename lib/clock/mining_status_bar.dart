@@ -15,6 +15,10 @@ class MiningStatusBar extends StatelessWidget {
   final VoidCallback onConnectWallet;
   final VoidCallback onToggleMining;
 
+  /// Prefer the mining/game bucket (where rewards accrue) when the wallet has
+  /// one; otherwise fall back to the liquid balance.
+  String? get _balance => state.gameBalance ?? state.nacklBalance;
+
   @override
   Widget build(BuildContext context) {
     final (label, color, icon) = switch (state.phase) {
@@ -72,9 +76,9 @@ class MiningStatusBar extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          if (state.nacklBalance != null) ...[
+          if (_balance != null) ...[
             Text(
-              '${state.nacklBalance}  NACKL',
+              '$_balance  NACKL',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 14,

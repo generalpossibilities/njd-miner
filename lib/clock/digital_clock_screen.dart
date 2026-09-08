@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../config/bee_config.dart';
 import '../mining/bee_miner.dart';
 import '../mining/foreground_service.dart';
 import '../widgets/home_widget_bridge.dart';
@@ -50,10 +51,13 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
       final wasSettingUp =
           _miner.phase == MinerPhase.propagatingKeys ||
           _miner.phase == MinerPhase.needsMiningKeys;
-      final sessionRolled = s.sessionsCompleted != _miner.sessionsCompleted;
+      // A new ~5-minute epoch → local tap counter restarts. (The authoritative
+      // count is s.tapSum5m from the contract; this is just for feel.)
+      final epochRolled =
+          s.epoch5mStart != null && s.epoch5mStart != _miner.epoch5mStart;
       setState(() {
         _miner = s;
-        if (sessionRolled) _tapsThisRun = 0;
+        if (epochRolled) _tapsThisRun = 0;
       });
       HomeWidgetBridge.update(s);
       MiningForegroundService.updateStatus(status: _notificationText(s));
@@ -92,14 +96,16 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
     }
   }
 
-  String _notificationText(MinerState s) => switch (s.phase) {
-    MinerPhase.mining =>
-      'Mining · tap the clock · ${s.nacklBalance ?? '—'} NACKL',
-    MinerPhase.idle => 'Idle · ${s.nacklBalance ?? '—'} NACKL',
-    MinerPhase.needsWallet => 'Tap to connect your Acki Nacki wallet',
-    MinerPhase.crashed => 'Miner stopped — open the app',
-    _ => 'Setting up mining…',
-  };
+  String _notificationText(MinerState s) {
+    final bal = s.gameBalance ?? s.nacklBalance ?? '—';
+    return switch (s.phase) {
+      MinerPhase.mining => 'Mining · tap the clock · $bal NACKL',
+      MinerPhase.idle => 'Idle · $bal NACKL',
+      MinerPhase.needsWallet => 'Tap to connect your Acki Nacki wallet',
+      MinerPhase.crashed => 'Miner stopped — open the app',
+      _ => 'Setting up mining…',
+    };
+  }
 
   @override
   void dispose() {
@@ -175,14 +181,9 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
                   onRetry: () => widget.miner.reload(),
                 ),
               if (_miner.isMining || _miner.phase == MinerPhase.idle)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    _tapsThisRun == 0
-                        ? 'Tap the time to mine'
-                        : '$_tapsThisRun taps this session',
-                    style: const TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
+                _TapProgress(
+                  taps: _miner.tapSum5m > 0 ? _miner.tapSum5m : _tapsThisRun,
+                  target: BeeConfig.tapsPerEpochTarget,
                 ),
               MiningStatusBar(
                 state: _miner,
@@ -198,6 +199,51 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// "43 / 70 taps this epoch" + a thin progress bar. Reward scales with taps in
+/// the ~5-minute epoch; hitting the target is the max.
+class _TapProgress extends StatelessWidget {
+  const _TapProgress({required this.taps, required this.target});
+
+  final int taps;
+  final int target;
+
+  @override
+  Widget build(BuildContext context) {
+    final frac = (taps / target).clamp(0.0, 1.0);
+    final done = taps >= target;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        children: [
+          Text(
+            taps == 0
+                ? 'Tap the time to mine'
+                : done
+                ? 'Epoch target reached · $taps taps'
+                : '$taps / $target taps this epoch',
+            style: TextStyle(
+              color: done ? const Color(0xFF6BE28B) : Colors.white38,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: LinearProgressIndicator(
+              value: frac,
+              minHeight: 3,
+              backgroundColor: Colors.white12,
+              valueColor: AlwaysStoppedAnimation(
+                done ? const Color(0xFF6BE28B) : const Color(0xFFFFC531),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

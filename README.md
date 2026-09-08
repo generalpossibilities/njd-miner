@@ -194,6 +194,21 @@ its visual style inspired by the Apache-2.0 `digital_clock` entry in
 
 ---
 
+## Reward mechanics (partly inferred)
+
+Bee accounts taps in a **~5-minute epoch** (`MinerAccountData._epoch5mStart` /
+`._tapSum5m`). `BeeConfig.sessionDurationMs` is 5 min and the runner re-arms at
+the boundary. Reward scales with taps in the epoch; the user-reported target is
+**~70 taps** (`BeeConfig.tapsPerEpochTarget`) — **not stated in the official
+docs**, so it only drives the on-screen progress bar. The authoritative count is
+`tap_sum_5m` from the contract, which the UI shows.
+
+**Locked vs liquid balance:** `get_multifactor_balances` returns `ecc` (liquid)
+and `popitgame` (candidate for the locked mining bucket). We don't have
+confirmation which holds mining rewards, so the wallet sheet dumps every balance
+map (`ecc` / `popitgame` / `tokens`) for a one-time check — see the debug box
+when a wallet is connected. The status bar prefers `popitgame` when present.
+
 ## Troubleshooting
 
 **"WebView load error … cleartext" / miner never leaves "Loading Bee Engine…"**

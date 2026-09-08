@@ -319,11 +319,34 @@ window.Bee = {
     await ensureSdk();
     const wallet = new Wallet(CFG().endpoints, null, CFG().apiUrl, CFG().appId);
     try {
-      const balances = await wallet.get_multifactor_balances({
+      const native = await wallet.get_multifactor_balances({
         multifactor_address: M.conn.walletAddress,
       });
-      const raw = balances.ecc?.[CFG().nacklEccSlot] ?? "0";
-      emit("balance", { nackl: nanoToDisplay(raw, 9, 4) });
+      let tokens = {};
+      try {
+        const t = await wallet.get_tokens_balances({
+          multifactor_address: M.conn.walletAddress,
+        });
+        tokens = t.tokens ?? {};
+      } catch (e) {
+        log("tokens balance err", String(e?.message || e));
+      }
+
+      const ecc = native.ecc ?? {};
+      const popitgame = native.popitgame ?? {};
+      const slot = CFG().nacklEccSlot;
+      // We don't yet know which bucket holds *locked* mining rewards — surface
+      // all of them so the UI can show a debug dump and we can pick the right
+      // one. `ecc[slot]` is the liquid/unlocked NACKL.
+      emit("balance", {
+        liquid: nanoToDisplay(ecc[slot] ?? "0", 9, 4),
+        game: popitgame[slot] != null ? nanoToDisplay(popitgame[slot], 9, 4) : null,
+        raw: {
+          ecc: Object.fromEntries(Object.entries(ecc)),
+          popitgame: Object.fromEntries(Object.entries(popitgame)),
+          tokens: Object.fromEntries(Object.entries(tokens)),
+        },
+      });
     } finally {
       wallet.free?.();
     }
@@ -333,7 +356,12 @@ window.Bee = {
     if (!M.miner) return;
     try {
       const d = await M.miner.get_miner_data();
-      emit("miner_data", { tapSum: d.tap_sum?.toString(), tapSum5m: d.tap_sum_5m?.toString() });
+      emit("miner_data", {
+        tapSum: d.tap_sum?.toString(),
+        tapSum5m: d.tap_sum_5m?.toString(),
+        epochStart: d.epoch_start?.toString(),
+        epoch5mStart: d.epoch_5m_start?.toString(),
+      });
       d.free?.();
     } catch (e) {
       log("minerData error", String(e?.message || e));
@@ -341,6 +369,16 @@ window.Bee = {
   },
 
   async disconnect() {
+    // Stop the miner before tearing down the session so no session keeps
+    // submitting against keys we're about to revoke.
+    M.running = false;
+    try {
+      M.miner?.stop();
+    } catch (e) {
+      log("disconnect stop err", String(e?.message || e));
+    }
+    M.sessionActive = false;
+
     try {
       if (M.conn) {
         const beeConnect = new BeeConnect();

@@ -31,9 +31,16 @@ class BeeConfig {
   static const String localHost = '127.0.0.1';
   static const int localPort = 8737;
 
-  /// How long a single mining session runs before the JS runner re-arms it.
-  /// The example uses 15s; keep sessions short so `stop()` is responsive.
-  static const int sessionDurationMs = 15000;
+  /// Length of one `Miner.start()` session. Bee accounts taps in a ~5-minute
+  /// epoch window (`_epoch5mStart` / `_tapSum5m` in `MinerAccountData`), so a
+  /// session is aligned to that; the JS runner re-arms at the boundary.
+  /// The upstream demo uses 15s — that's a demo button, not a real session.
+  static const int sessionDurationMs = 300000; // 5 min
+
+  /// Taps in one epoch that yield the maximum reward; fewer taps → less.
+  /// User-reported (~70); not stated in the official docs. Drives only the
+  /// on-screen progress hint — the contract's `tap_sum_5m` is the real figure.
+  static const int tapsPerEpochTarget = 70;
 
   /// ECC token slot for NACKL in `wallet.get_multifactor_balances()`.
   static const String nacklEccSlot = '1';

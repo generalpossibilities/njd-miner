@@ -29,22 +29,41 @@ class MinerState {
   const MinerState({
     required this.phase,
     this.nacklBalance,
+    this.gameBalance,
+    this.balanceDebug,
     this.sessionsCompleted = 0,
     this.tapSum,
+    this.tapSum5m = 0,
+    this.epoch5mStart,
     this.message,
     this.error,
   });
 
   final MinerPhase phase;
 
-  /// Formatted NACKL balance, e.g. "12.3456". Null until first poll succeeds.
+  /// Liquid/unlocked NACKL (`ecc["1"]`), e.g. "12.3456". Null until first poll.
   final String? nacklBalance;
+
+  /// `popitgame["1"]` NACKL — candidate for the *locked* mining-reward balance.
+  /// May be null if the wallet has no game bucket. See [balanceDebug].
+  final String? gameBalance;
+
+  /// Raw dump of every balance map (ecc / popitgame / tokens) for one device
+  /// round-trip, so we can identify which field holds locked rewards.
+  final String? balanceDebug;
 
   /// Count of mining sessions finished this run (informational).
   final int sessionsCompleted;
 
-  /// `tap_sum` from `miner.get_miner_data()` — rough "work done" indicator.
+  /// `tap_sum` from `miner.get_miner_data()` — lifetime tap work.
   final String? tapSum;
+
+  /// `tap_sum_5m` — taps counted in the current ~5-minute epoch (the number
+  /// that actually drives the reward). Source of truth for tap progress.
+  final int tapSum5m;
+
+  /// `_epoch5mStart` — changes when a new 5-minute epoch begins.
+  final String? epoch5mStart;
 
   final String? message;
   final String? error;
@@ -54,16 +73,27 @@ class MinerState {
   MinerState copyWith({
     MinerPhase? phase,
     String? nacklBalance,
+    Object? gameBalance = _sentinel,
+    String? balanceDebug,
     int? sessionsCompleted,
     String? tapSum,
+    int? tapSum5m,
+    String? epoch5mStart,
     String? message,
     Object? error = _sentinel,
   }) {
     return MinerState(
       phase: phase ?? this.phase,
       nacklBalance: nacklBalance ?? this.nacklBalance,
+      gameBalance:
+          identical(gameBalance, _sentinel)
+              ? this.gameBalance
+              : gameBalance as String?,
+      balanceDebug: balanceDebug ?? this.balanceDebug,
       sessionsCompleted: sessionsCompleted ?? this.sessionsCompleted,
       tapSum: tapSum ?? this.tapSum,
+      tapSum5m: tapSum5m ?? this.tapSum5m,
+      epoch5mStart: epoch5mStart ?? this.epoch5mStart,
       message: message ?? this.message,
       error: identical(error, _sentinel) ? this.error : error as String?,
     );
@@ -122,6 +152,9 @@ abstract class BeeMiner {
 
   /// Refresh the NACKL balance now.
   Future<void> refreshBalance();
+
+  /// Disconnect the wallet: stop mining, revoke the session, clear stored keys.
+  Future<void> disconnect();
 
   /// Reload the underlying host and re-run [initialize] — used by the on-screen
   /// "Retry" after a crash.
