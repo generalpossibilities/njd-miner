@@ -7,6 +7,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../config/bee_config.dart';
 import '../mining/bee_miner.dart';
 import '../mining/foreground_service.dart';
+import '../overlay/overlay_manager.dart';
 import '../widgets/home_widget_bridge.dart';
 import 'clock_face.dart';
 import 'mining_status_bar.dart';
@@ -18,9 +19,14 @@ import 'wallet_sheet.dart';
 /// clock face is a tap target: every touch is a real `add_tap`, and an
 /// untouched clock is just a clock.
 class DigitalClockScreen extends StatefulWidget {
-  const DigitalClockScreen({super.key, required this.miner});
+  const DigitalClockScreen({
+    super.key,
+    required this.miner,
+    required this.overlay,
+  });
 
   final BeeMiner miner;
+  final OverlayManager overlay;
 
   @override
   State<DigitalClockScreen> createState() => _DigitalClockScreenState();
@@ -45,6 +51,8 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       setState(() => _now = DateTime.now());
     });
+
+    widget.overlay.addListener(_onOverlay);
 
     _miner = widget.miner.state;
     _sub = widget.miner.states.listen((s) {
@@ -107,10 +115,15 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
     };
   }
 
+  void _onOverlay() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     _ticker.cancel();
     _sub?.cancel();
+    widget.overlay.removeListener(_onOverlay);
     WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
@@ -121,7 +134,7 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
       context: context,
       backgroundColor: const Color(0xFF111214),
       isScrollControlled: true,
-      builder: (_) => WalletSheet(miner: widget.miner),
+      builder: (_) => WalletSheet(miner: widget.miner, overlay: widget.overlay),
     );
   }
 
@@ -171,6 +184,23 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
                           key: ValueKey(_lastTapTime),
                           at: _lastTapAt!,
                         ),
+                      Positioned(
+                        top: 0,
+                        right: 0,
+                        child: IconButton(
+                          tooltip: 'Floating clock',
+                          onPressed: () => widget.overlay.toggle(),
+                          icon: Icon(
+                            widget.overlay.active
+                                ? Icons.picture_in_picture_alt
+                                : Icons.picture_in_picture_alt_outlined,
+                            color:
+                                widget.overlay.active
+                                    ? const Color(0xFFFFC531)
+                                    : Colors.white38,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -180,7 +210,13 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
                   message: _miner.error!,
                   onRetry: () => widget.miner.reload(),
                 ),
-              if (_miner.isMining || _miner.phase == MinerPhase.idle)
+              if (widget.overlay.overlayOwnsMining)
+                _TapProgress(
+                  taps: widget.overlay.overlayTaps,
+                  target: BeeConfig.tapsPerEpochTarget,
+                  label: 'floating clock is mining',
+                )
+              else if (_miner.isMining || _miner.phase == MinerPhase.idle)
                 _TapProgress(
                   taps: _miner.tapSum5m > 0 ? _miner.tapSum5m : _tapsThisRun,
                   target: BeeConfig.tapsPerEpochTarget,
@@ -207,10 +243,11 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
 /// "43 / 70 taps this epoch" + a thin progress bar. Reward scales with taps in
 /// the ~5-minute epoch; hitting the target is the max.
 class _TapProgress extends StatelessWidget {
-  const _TapProgress({required this.taps, required this.target});
+  const _TapProgress({required this.taps, required this.target, this.label});
 
   final int taps;
   final int target;
+  final String? label;
 
   @override
   Widget build(BuildContext context) {
@@ -221,11 +258,11 @@ class _TapProgress extends StatelessWidget {
       child: Column(
         children: [
           Text(
-            taps == 0
+            label != null
+                ? '$label · $taps taps this epoch'
+                : taps == 0
                 ? 'Tap the time to mine'
-                : done
-                ? 'Epoch target reached · $taps taps'
-                : '$taps / $target taps this epoch',
+                : '$taps taps this epoch',
             style: TextStyle(
               color: done ? const Color(0xFF6BE28B) : Colors.white38,
               fontSize: 12,

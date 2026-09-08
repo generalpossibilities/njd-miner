@@ -194,6 +194,23 @@ its visual style inspired by the Apache-2.0 `digital_clock` entry in
 
 ---
 
+## Floating clock (overlay)
+
+Wallet sheet → **Floating clock** toggle (needs "display over other apps"). It
+shows a small draggable clock on top of every app via `flutter_overlay_window`.
+
+The overlay runs in its **own** Flutter engine, so it builds its own
+`WebViewBeeMiner`. Same process + same `http://127.0.0.1` origin ⇒ that WebView
+reads the wallet session and mining keys the main app stored. **Single-miner
+rule:** while the overlay is up it owns mining and the main app's miner stands
+down; closing the overlay hands mining back.
+
+**This depends on an Android WebView platform view rendering inside an overlay
+window — not guaranteed on every device.** The overlay self-detects: if the
+miner doesn't come up within 12 s it switches to **display-only** and forwards
+taps to the main app (which then mines only while it's foregrounded). The
+overlay's status line says which mode you're in.
+
 ## Reward mechanics (partly inferred)
 
 Bee accounts taps in a **~5-minute epoch** (`MinerAccountData._epoch5mStart` /

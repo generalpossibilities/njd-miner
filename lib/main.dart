@@ -4,12 +4,21 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'clock/digital_clock_screen.dart';
 import 'mining/foreground_service.dart';
 import 'mining/webview_bee_miner.dart';
+import 'overlay/overlay_clock.dart';
+import 'overlay/overlay_manager.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterForegroundTask.initCommunicationPort();
   MiningForegroundService.init();
   runApp(const NjdMinerApp());
+}
+
+/// Entry point for the floating-clock overlay window (a separate FlutterEngine).
+/// `flutter_overlay_window` invokes the function named `overlayMain`.
+@pragma('vm:entry-point')
+void overlayMain() {
+  runApp(const OverlayClock());
 }
 
 class NjdMinerApp extends StatefulWidget {
@@ -21,9 +30,11 @@ class NjdMinerApp extends StatefulWidget {
 
 class _NjdMinerAppState extends State<NjdMinerApp> {
   final WebViewBeeMiner _miner = WebViewBeeMiner();
+  late final OverlayManager _overlay = OverlayManager(_miner);
 
   @override
   void dispose() {
+    _overlay.dispose();
     _miner.dispose();
     super.dispose();
   }
@@ -46,7 +57,7 @@ class _NjdMinerAppState extends State<NjdMinerApp> {
             // opaque clock on top hides it. (A 1x1 / offstage WebView gets
             // throttled or never initialises on some devices.)
             IgnorePointer(child: _miner.buildOffstageHost()),
-            DigitalClockScreen(miner: _miner),
+            DigitalClockScreen(miner: _miner, overlay: _overlay),
           ],
         ),
       ),

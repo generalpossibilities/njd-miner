@@ -29,6 +29,18 @@ class WebViewBeeMiner implements BeeMiner {
     documentRoot: 'assets/bee',
   );
 
+  /// Start the shared asset server, tolerating "address already in use" — the
+  /// overlay isolate and the main isolate each try, and whichever binds first
+  /// serves both (same process, same origin).
+  static Future<void> _ensureServer() async {
+    if (_server.isRunning()) return;
+    try {
+      await _server.start();
+    } catch (_) {
+      // Another engine in this process already bound the port; that's fine.
+    }
+  }
+
   InAppWebViewController? _controller;
   Completer<void> _webViewReady = Completer<void>();
 
@@ -74,9 +86,7 @@ class WebViewBeeMiner implements BeeMiner {
           callback: (args) => _onBeeEvent(args.isNotEmpty ? args.first : null),
         );
         try {
-          if (!_server.isRunning()) {
-            await _server.start();
-          }
+          await _ensureServer();
           await controller.loadUrl(
             urlRequest: URLRequest(url: WebUri.uri(_indexUri)),
           );
@@ -220,7 +230,7 @@ class WebViewBeeMiner implements BeeMiner {
       _webViewReady = Completer<void>();
     }
     try {
-      if (!_server.isRunning()) await _server.start();
+      await _ensureServer();
       await _controller?.loadUrl(
         urlRequest: URLRequest(url: WebUri.uri(_indexUri)),
       );

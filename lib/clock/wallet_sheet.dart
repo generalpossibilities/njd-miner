@@ -6,14 +6,16 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../mining/bee_miner.dart';
+import '../overlay/overlay_manager.dart';
 
 /// Bottom sheet: connect AN Wallet → authorise mining keys → (mining then
 /// arms). When a wallet is already connected it shows balances + a disconnect
 /// button instead.
 class WalletSheet extends StatefulWidget {
-  const WalletSheet({super.key, required this.miner});
+  const WalletSheet({super.key, required this.miner, required this.overlay});
 
   final BeeMiner miner;
+  final OverlayManager overlay;
 
   @override
   State<WalletSheet> createState() => _WalletSheetState();
@@ -177,7 +179,23 @@ class _WalletSheetState extends State<WalletSheet> {
         _balanceRow('Liquid (unlocked)', state.nacklBalance),
         _balanceRow('Mining / game bucket', state.gameBalance),
         _balanceRow('Taps this epoch', '${state.tapSum5m}'),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          value: widget.overlay.active,
+          onChanged: (_) => widget.overlay.toggle(),
+          title: const Text(
+            'Floating clock',
+            style: TextStyle(color: Colors.white, fontSize: 14),
+          ),
+          subtitle: const Text(
+            'A draggable clock over other apps that keeps mining. Needs '
+            '"display over other apps" permission.',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+        ),
+        const SizedBox(height: 8),
         Row(
           children: [
             OutlinedButton.icon(
