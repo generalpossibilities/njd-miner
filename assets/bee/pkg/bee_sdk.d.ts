@@ -593,10 +593,29 @@ export class MinerAccountData {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
+    epoch_5m_start_old: bigint;
     epoch_5m_start: bigint;
     epoch_start: bigint;
+    /**
+     * `_miningDurSum` — total mining duration the wallet has accumulated in the
+     * current big (24-hour) epoch, in the contract's time units.
+     */
+    mining_dur_sum: bigint;
+    /**
+     * `_modifiedTapSum` — reputation-weighted tap total (drives the payout).
+     */
+    modified_tap_sum: bigint;
+    /**
+     * `_oldTapsSize` — session count from the immediately previous short epoch.
+     */
+    old_taps_size: bigint;
     tap_sum_5m: bigint;
     tap_sum: bigint;
+    /**
+     * `_tapsSize` — number of mining sessions the wallet has recorded in the
+     * current short (~5-minute) reward epoch. Resets when `epoch_5m_start` rolls.
+     */
+    taps_size: bigint;
 }
 
 /**
@@ -1148,9 +1167,14 @@ export interface InitOutput {
     readonly __wbg_cryptoresultofsign_free: (a: number, b: number) => void;
     readonly __wbg_get_graphqlblockdata_seq_no: (a: number) => bigint;
     readonly __wbg_get_mineraccountdata_epoch_5m_start: (a: number) => bigint;
+    readonly __wbg_get_mineraccountdata_epoch_5m_start_old: (a: number) => bigint;
     readonly __wbg_get_mineraccountdata_epoch_start: (a: number) => bigint;
+    readonly __wbg_get_mineraccountdata_mining_dur_sum: (a: number) => [bigint, bigint];
+    readonly __wbg_get_mineraccountdata_modified_tap_sum: (a: number) => [bigint, bigint];
+    readonly __wbg_get_mineraccountdata_old_taps_size: (a: number) => [bigint, bigint];
     readonly __wbg_get_mineraccountdata_tap_sum: (a: number) => [bigint, bigint];
     readonly __wbg_get_mineraccountdata_tap_sum_5m: (a: number) => [bigint, bigint];
+    readonly __wbg_get_mineraccountdata_taps_size: (a: number) => [bigint, bigint];
     readonly __wbg_graphqlblockdata_free: (a: number, b: number) => void;
     readonly __wbg_issbase64details_free: (a: number, b: number) => void;
     readonly __wbg_miner_free: (a: number, b: number) => void;
@@ -1186,9 +1210,14 @@ export interface InitOutput {
     readonly __wbg_resultofwaitwallethello_free: (a: number, b: number) => void;
     readonly __wbg_set_graphqlblockdata_seq_no: (a: number, b: bigint) => void;
     readonly __wbg_set_mineraccountdata_epoch_5m_start: (a: number, b: bigint) => void;
+    readonly __wbg_set_mineraccountdata_epoch_5m_start_old: (a: number, b: bigint) => void;
     readonly __wbg_set_mineraccountdata_epoch_start: (a: number, b: bigint) => void;
+    readonly __wbg_set_mineraccountdata_mining_dur_sum: (a: number, b: bigint, c: bigint) => void;
+    readonly __wbg_set_mineraccountdata_modified_tap_sum: (a: number, b: bigint, c: bigint) => void;
+    readonly __wbg_set_mineraccountdata_old_taps_size: (a: number, b: bigint, c: bigint) => void;
     readonly __wbg_set_mineraccountdata_tap_sum: (a: number, b: bigint, c: bigint) => void;
     readonly __wbg_set_mineraccountdata_tap_sum_5m: (a: number, b: bigint, c: bigint) => void;
+    readonly __wbg_set_mineraccountdata_taps_size: (a: number, b: bigint, c: bigint) => void;
     readonly __wbg_txdata_free: (a: number, b: number) => void;
     readonly __wbg_wallet_free: (a: number, b: number) => void;
     readonly __wbg_zklogincompletewithproverresult_free: (a: number, b: number) => void;
@@ -1507,8 +1536,8 @@ export interface InitOutput {
     readonly wasm_bindgen__convert__closures_____invoke__h3bb2fb1b11ee80c5: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h925b4af5ea1f93bb: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_317: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_319: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_327: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_329: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__he543d5900fbe76e3: (a: number, b: number, c: any) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h16e37a3982040429: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h876d8efedbc4c57a: (a: number, b: number) => void;

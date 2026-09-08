@@ -1134,6 +1134,13 @@ export class MinerAccountData {
     /**
      * @returns {bigint}
      */
+    get epoch_5m_start_old() {
+        const ret = wasm.__wbg_get_mineraccountdata_epoch_5m_start_old(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * @returns {bigint}
+     */
     get epoch_5m_start() {
         const ret = wasm.__wbg_get_mineraccountdata_epoch_5m_start(this.__wbg_ptr);
         return BigInt.asUintN(64, ret);
@@ -1144,6 +1151,31 @@ export class MinerAccountData {
     get epoch_start() {
         const ret = wasm.__wbg_get_mineraccountdata_epoch_start(this.__wbg_ptr);
         return BigInt.asUintN(64, ret);
+    }
+    /**
+     * `_miningDurSum` — total mining duration the wallet has accumulated in the
+     * current big (24-hour) epoch, in the contract's time units.
+     * @returns {bigint}
+     */
+    get mining_dur_sum() {
+        const ret = wasm.__wbg_get_mineraccountdata_mining_dur_sum(this.__wbg_ptr);
+        return (BigInt.asUintN(64, ret[0]) | (BigInt.asUintN(64, ret[1]) << BigInt(64)));
+    }
+    /**
+     * `_modifiedTapSum` — reputation-weighted tap total (drives the payout).
+     * @returns {bigint}
+     */
+    get modified_tap_sum() {
+        const ret = wasm.__wbg_get_mineraccountdata_modified_tap_sum(this.__wbg_ptr);
+        return (BigInt.asUintN(64, ret[0]) | (BigInt.asUintN(64, ret[1]) << BigInt(64)));
+    }
+    /**
+     * `_oldTapsSize` — session count from the immediately previous short epoch.
+     * @returns {bigint}
+     */
+    get old_taps_size() {
+        const ret = wasm.__wbg_get_mineraccountdata_old_taps_size(this.__wbg_ptr);
+        return (BigInt.asUintN(64, ret[0]) | (BigInt.asUintN(64, ret[1]) << BigInt(64)));
     }
     /**
      * @returns {bigint}
@@ -1160,6 +1192,21 @@ export class MinerAccountData {
         return (BigInt.asUintN(64, ret[0]) | (BigInt.asUintN(64, ret[1]) << BigInt(64)));
     }
     /**
+     * `_tapsSize` — number of mining sessions the wallet has recorded in the
+     * current short (~5-minute) reward epoch. Resets when `epoch_5m_start` rolls.
+     * @returns {bigint}
+     */
+    get taps_size() {
+        const ret = wasm.__wbg_get_mineraccountdata_taps_size(this.__wbg_ptr);
+        return (BigInt.asUintN(64, ret[0]) | (BigInt.asUintN(64, ret[1]) << BigInt(64)));
+    }
+    /**
+     * @param {bigint} arg0
+     */
+    set epoch_5m_start_old(arg0) {
+        wasm.__wbg_set_mineraccountdata_epoch_5m_start_old(this.__wbg_ptr, arg0);
+    }
+    /**
      * @param {bigint} arg0
      */
     set epoch_5m_start(arg0) {
@@ -1172,6 +1219,28 @@ export class MinerAccountData {
         wasm.__wbg_set_mineraccountdata_epoch_start(this.__wbg_ptr, arg0);
     }
     /**
+     * `_miningDurSum` — total mining duration the wallet has accumulated in the
+     * current big (24-hour) epoch, in the contract's time units.
+     * @param {bigint} arg0
+     */
+    set mining_dur_sum(arg0) {
+        wasm.__wbg_set_mineraccountdata_mining_dur_sum(this.__wbg_ptr, arg0, arg0 >> BigInt(64));
+    }
+    /**
+     * `_modifiedTapSum` — reputation-weighted tap total (drives the payout).
+     * @param {bigint} arg0
+     */
+    set modified_tap_sum(arg0) {
+        wasm.__wbg_set_mineraccountdata_modified_tap_sum(this.__wbg_ptr, arg0, arg0 >> BigInt(64));
+    }
+    /**
+     * `_oldTapsSize` — session count from the immediately previous short epoch.
+     * @param {bigint} arg0
+     */
+    set old_taps_size(arg0) {
+        wasm.__wbg_set_mineraccountdata_old_taps_size(this.__wbg_ptr, arg0, arg0 >> BigInt(64));
+    }
+    /**
      * @param {bigint} arg0
      */
     set tap_sum_5m(arg0) {
@@ -1182,6 +1251,14 @@ export class MinerAccountData {
      */
     set tap_sum(arg0) {
         wasm.__wbg_set_mineraccountdata_tap_sum(this.__wbg_ptr, arg0, arg0 >> BigInt(64));
+    }
+    /**
+     * `_tapsSize` — number of mining sessions the wallet has recorded in the
+     * current short (~5-minute) reward epoch. Resets when `epoch_5m_start` rolls.
+     * @param {bigint} arg0
+     */
+    set taps_size(arg0) {
+        wasm.__wbg_set_mineraccountdata_taps_size(this.__wbg_ptr, arg0, arg0 >> BigInt(64));
     }
 }
 if (Symbol.dispose) MinerAccountData.prototype[Symbol.dispose] = MinerAccountData.prototype.free;
@@ -5585,7 +5662,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 3416, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_317);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_327);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0, arg1) {
@@ -5595,7 +5672,7 @@ function __wbg_get_imports() {
         },
         __wbindgen_generic_0000000000000006: function(arg0, arg1) {
             // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 3416, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_319);
+            const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_329);
             return ret;
         },
         __wbindgen_generic_0000000000000007: function(arg0, arg1) {
@@ -5688,12 +5765,12 @@ function wasm_bindgen__convert__closures_____invoke__he543d5900fbe76e3(arg0, arg
     wasm.wasm_bindgen__convert__closures_____invoke__he543d5900fbe76e3(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_317(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_317(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_327(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_327(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_319(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_319(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_329(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_329(arg0, arg1, arg2);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h321bf97868035313(arg0, arg1, arg2) {

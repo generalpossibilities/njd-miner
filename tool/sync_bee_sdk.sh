@@ -8,6 +8,9 @@ BEE_ENGINE="${1:?usage: tool/sync_bee_sdk.sh /path/to/bee-engine}"
 APP_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$APP_ROOT/assets/bee/pkg"
 
+echo "==> patching MinerAccountData (expose on-chain session/epoch fields)"
+"$APP_ROOT/tool/patch_bee_engine.py" "$BEE_ENGINE"
+
 echo "==> building bee_sdk (wasm-pack --target web)"
 ( cd "$BEE_ENGINE/bee_sdk" && rm -rf pkg && wasm-pack build --target web )
 

@@ -118,7 +118,31 @@ const M = {
   epochTaps: 0,
   epochStart: null, // _epochBigStart; reset budget when it changes
   errors: 0,
+  lastGameRaw: null, // previous popitgame[slot] in nano, for the reward delta
 };
+
+/** Shape a `get_miner_data()` result into the event payload the Dart side
+ *  reads. Everything past the first four keys needs the extended
+ *  `MinerAccountData` struct (rebuilt WASM) — the optional-chaining keeps this
+ *  safe against an older bundle where the getters don't exist. */
+function minerDataPayload(d) {
+  return {
+    tapSum: d?.tap_sum?.toString(),
+    tapSum5m: d?.tap_sum_5m?.toString(),
+    epochStart: d?.epoch_start?.toString(),
+    epoch5mStart: d?.epoch_5m_start?.toString(),
+    epoch5mStartOld: d?.epoch_5m_start_old?.toString(),
+    tapsSize: d?.taps_size?.toString(),
+    oldTapsSize: d?.old_taps_size?.toString(),
+    modifiedTapSum: d?.modified_tap_sum?.toString(),
+    miningDurSum: d?.mining_dur_sum?.toString(),
+  };
+}
+function emitMinerData(d) {
+  const p = minerDataPayload(d);
+  log("miner_data", JSON.stringify(p));
+  emit("miner_data", p);
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rint = (a, b) => a + Math.random() * (b - a);
@@ -221,12 +245,7 @@ async function runSessionLoop() {
           M.epochTaps = 0;
           emit("epoch_rolled", { epochStart: es });
         }
-        emit("miner_data", {
-          tapSum: d?.tap_sum?.toString(),
-          tapSum5m: d?.tap_sum_5m?.toString(),
-          epochStart: es,
-          epoch5mStart: d?.epoch_5m_start?.toString(),
-        });
+        emitMinerData(d);
         d?.free?.();
       } catch (e) {
         log("pre tap_sum", String(e?.message || e));
@@ -235,6 +254,7 @@ async function runSessionLoop() {
       // start session, wait for the worker's first callback (2s cap)
       let workerReady = false;
       let sessionAccepted = false;
+      let proofSubmitted = false;
       let sessionEmpty = false;
       let sessionErr = null;
       await new Promise((resolve) => {
@@ -253,6 +273,8 @@ async function runSessionLoop() {
             sessionErr = `${e.action}: ${e.error}`;
           } else if (e.action === "computation_completed" && e.data?.empty) {
             sessionEmpty = true;
+          } else if (e.action === "submit_session_proof") {
+            proofSubmitted = true;
           } else if (e.action === "session_accepted") {
             sessionAccepted = true;
           }
@@ -298,29 +320,42 @@ async function runSessionLoop() {
       }
 
       // ── submit ────────────────────────────────────────────────
+      // The 70 taps finish well inside the 330 s session, so stop the worker
+      // now and let it push its proof. Do NOT block here waiting for a
+      // `session_accepted` event — that event rides the GraphQL events API,
+      // which is unreliable, and waiting on it stretched every cycle to
+      // ~10 min (one reward epoch is only ~5.5 min). The reward accrues
+      // on-chain regardless; we notice the session landed by watching
+      // `tap_sum` climb, then call get_reward().
       emitSession("submitting");
       await sleep(Math.random() * SUBMIT_STAGGER);
       try {
         miner.stop();
       } catch {}
 
-      // wait for on-chain acceptance (cap ~180s)
-      for (let w = 0; w < 18 && M.running && !sessionAccepted && !sessionErr; w++) {
-        await sleep(10000);
+      // Let the worker push its proof — cap ~60 s, break as soon as the
+      // proof is in (or the session errored / came back empty).
+      for (
+        let w = 0;
+        w < 20 && M.running && !proofSubmitted && !sessionAccepted && !sessionErr && !sessionEmpty;
+        w++
+      ) {
+        await sleep(3000);
       }
 
-      // tap_sum after
+      // tap_sum after — poll until it reflects this session (cap ~48 s).
       let tapAfter = tapBefore;
-      for (let retry = 0; retry < 3; retry++) {
+      for (let retry = 0; retry < 12 && M.running; retry++) {
         try {
           const d = await miner.get_miner_data();
           tapAfter = safeNum(d?.tap_sum);
+          emitMinerData(d);
           d?.free?.();
           if (tapAfter > tapBefore) break;
-          if (retry < 2) await sleep(5000);
         } catch (e) {
           log("post tap_sum", String(e?.message || e));
         }
+        await sleep(4000);
       }
       const confirmed = Math.max(0, tapAfter - tapBefore);
       M.confirmed = confirmed;
@@ -357,7 +392,7 @@ async function runSessionLoop() {
 
       miner.free?.();
       M.currentMiner = null;
-      await sleep(5000 + Math.random() * cfg.sessionBoundaryJitterMs);
+      await sleep(2000 + Math.random() * cfg.sessionBoundaryJitterMs);
     } catch (e) {
       M.errors++;
       emit("miner_error", { where: "session", error: String(e?.message || e) });
@@ -549,12 +584,25 @@ window.Bee = {
       const ecc = native.ecc ?? {};
       const popitgame = native.popitgame ?? {};
       const slot = CFG().nacklEccSlot;
-      // We don't yet know which bucket holds *locked* mining rewards — surface
-      // all of them so the UI can show a debug dump and we can pick the right
-      // one. `ecc[slot]` is the liquid/unlocked NACKL.
+      // `popitgame[slot]` is the locked mining-rewards bucket (confirmed) —
+      // that's the headline NACKL number. `ecc[slot]` is liquid/unlocked.
+      // Diff successive `popitgame` reads to surface the last reward that
+      // landed; do it in BigInt so nano-precision survives.
+      const gameRaw = popitgame[slot] != null ? String(popitgame[slot]) : null;
+      let lastReward = null;
+      if (gameRaw != null && M.lastGameRaw != null) {
+        try {
+          const delta = BigInt(gameRaw) - BigInt(M.lastGameRaw);
+          if (delta > 0n) lastReward = nanoToDisplay(delta.toString(), 9, 4);
+        } catch {}
+      }
+      if (gameRaw != null) M.lastGameRaw = gameRaw;
+
       emit("balance", {
         liquid: nanoToDisplay(ecc[slot] ?? "0", 9, 4),
-        game: popitgame[slot] != null ? nanoToDisplay(popitgame[slot], 9, 4) : null,
+        game: gameRaw != null ? nanoToDisplay(gameRaw, 9, 4) : null,
+        gameRaw,
+        lastReward,
         raw: {
           ecc: Object.fromEntries(Object.entries(ecc)),
           popitgame: Object.fromEntries(Object.entries(popitgame)),
@@ -571,12 +619,7 @@ window.Bee = {
     if (!src) return;
     try {
       const d = await src.get_miner_data();
-      emit("miner_data", {
-        tapSum: d.tap_sum?.toString(),
-        tapSum5m: d.tap_sum_5m?.toString(),
-        epochStart: d.epoch_start?.toString(),
-        epoch5mStart: d.epoch_5m_start?.toString(),
-      });
+      emitMinerData(d);
       d.free?.();
     } catch (e) {
       log("minerData error", String(e?.message || e));
@@ -616,6 +659,7 @@ window.Bee = {
     M.currentMiner = null;
     M.sessions = 0;
     M.epochTaps = 0;
+    M.lastGameRaw = null;
     writeKeys(M.conn, null);
     writeSession(null);
     M.conn = null;

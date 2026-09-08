@@ -30,11 +30,17 @@ class MinerState {
     required this.phase,
     this.nacklBalance,
     this.gameBalance,
+    this.lastReward,
     this.balanceDebug,
     this.sessionsCompleted = 0,
     this.tapSum,
     this.tapSum5m = 0,
     this.epoch5mStart,
+    this.epoch5mStartOld,
+    this.tapsSize = 0,
+    this.oldTapsSize = 0,
+    this.modifiedTapSum,
+    this.miningDurSum,
     this.sessionPhase,
     this.tapsSent = 0,
     this.confirmed = 0,
@@ -49,9 +55,13 @@ class MinerState {
   /// Liquid/unlocked NACKL (`ecc["1"]`), e.g. "12.3456". Null until first poll.
   final String? nacklBalance;
 
-  /// `popitgame["1"]` NACKL — candidate for the *locked* mining-reward balance.
-  /// May be null if the wallet has no game bucket. See [balanceDebug].
+  /// `popitgame["1"]` NACKL — the *locked* mining-reward balance. This is the
+  /// headline number. May be null if the wallet has no game bucket yet.
   final String? gameBalance;
+
+  /// The most recent positive jump in [gameBalance] between two balance polls,
+  /// formatted like "12.3456". Null until a reward actually lands.
+  final String? lastReward;
 
   /// Raw dump of every balance map (ecc / popitgame / tokens) for one device
   /// round-trip, so we can identify which field holds locked rewards.
@@ -60,15 +70,33 @@ class MinerState {
   /// Count of mining sessions finished this run (informational).
   final int sessionsCompleted;
 
-  /// `tap_sum` from `miner.get_miner_data()` — lifetime tap work.
+  /// `_tapSum` from `miner.get_miner_data()` — total taps the wallet has made
+  /// on-chain in the current big (24-hour) epoch. This is the "epoch taps"
+  /// figure shown in the UI.
   final String? tapSum;
 
-  /// `tap_sum_5m` — taps counted in the current ~5-minute epoch (the number
-  /// that actually drives the reward). Source of truth for tap progress.
+  /// `tap_sum_5m` — taps counted in the current ~5-minute reward epoch (the
+  /// number that actually drives the current reward).
   final int tapSum5m;
 
-  /// `_epoch5mStart` — changes when a new 5-minute epoch begins.
+  /// `_epochStart` — changes when a new ~5-minute reward epoch begins.
   final String? epoch5mStart;
+
+  /// `_epochStartOld` — start of the immediately previous ~5-minute epoch.
+  final String? epoch5mStartOld;
+
+  /// `_tapsSize` — number of mining sessions recorded in the current
+  /// ~5-minute reward epoch (on-chain).
+  final int tapsSize;
+
+  /// `_oldTapsSize` — session count from the previous ~5-minute epoch.
+  final int oldTapsSize;
+
+  /// `_modifiedTapSum` — reputation-weighted tap total (drives the payout).
+  final String? modifiedTapSum;
+
+  /// `_miningDurSum` — total mining duration accrued this 24-hour epoch.
+  final String? miningDurSum;
 
   /// Current session sub-phase from the auto-tap loop:
   /// `starting` | `tapping` | `submitting` | `idle` | `waiting`.
@@ -93,11 +121,17 @@ class MinerState {
     MinerPhase? phase,
     String? nacklBalance,
     Object? gameBalance = _sentinel,
+    Object? lastReward = _sentinel,
     String? balanceDebug,
     int? sessionsCompleted,
     String? tapSum,
     int? tapSum5m,
     String? epoch5mStart,
+    String? epoch5mStartOld,
+    int? tapsSize,
+    int? oldTapsSize,
+    String? modifiedTapSum,
+    String? miningDurSum,
     String? sessionPhase,
     int? tapsSent,
     int? confirmed,
@@ -113,11 +147,20 @@ class MinerState {
           identical(gameBalance, _sentinel)
               ? this.gameBalance
               : gameBalance as String?,
+      lastReward:
+          identical(lastReward, _sentinel)
+              ? this.lastReward
+              : lastReward as String?,
       balanceDebug: balanceDebug ?? this.balanceDebug,
       sessionsCompleted: sessionsCompleted ?? this.sessionsCompleted,
       tapSum: tapSum ?? this.tapSum,
       tapSum5m: tapSum5m ?? this.tapSum5m,
       epoch5mStart: epoch5mStart ?? this.epoch5mStart,
+      epoch5mStartOld: epoch5mStartOld ?? this.epoch5mStartOld,
+      tapsSize: tapsSize ?? this.tapsSize,
+      oldTapsSize: oldTapsSize ?? this.oldTapsSize,
+      modifiedTapSum: modifiedTapSum ?? this.modifiedTapSum,
+      miningDurSum: miningDurSum ?? this.miningDurSum,
       sessionPhase: sessionPhase ?? this.sessionPhase,
       tapsSent: tapsSent ?? this.tapsSent,
       confirmed: confirmed ?? this.confirmed,

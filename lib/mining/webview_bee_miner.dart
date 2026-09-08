@@ -350,22 +350,29 @@ class WebViewBeeMiner implements BeeMiner {
         );
         break;
       case 'balance':
-        _set(
-          _state.copyWith(
-            nacklBalance: raw['liquid']?.toString(),
-            gameBalance: raw['game']?.toString(),
-            balanceDebug: raw['raw'] == null ? null : jsonEncode(raw['raw']),
-          ),
+        var next = _state.copyWith(
+          nacklBalance: raw['liquid']?.toString(),
+          gameBalance: raw['game']?.toString(),
+          balanceDebug: raw['raw'] == null ? null : jsonEncode(raw['raw']),
         );
+        // Only overwrite lastReward when the runner reports a fresh jump; a
+        // plain poll with no delta leaves the previous value in place.
+        final lr = raw['lastReward']?.toString();
+        if (lr != null) next = next.copyWith(lastReward: lr);
+        _set(next);
         break;
       case 'miner_data':
+        int? i(String k) => int.tryParse(raw[k]?.toString() ?? '');
         _set(
           _state.copyWith(
             tapSum: raw['tapSum']?.toString(),
-            tapSum5m:
-                int.tryParse(raw['tapSum5m']?.toString() ?? '') ??
-                _state.tapSum5m,
+            tapSum5m: i('tapSum5m') ?? _state.tapSum5m,
             epoch5mStart: raw['epoch5mStart']?.toString(),
+            epoch5mStartOld: raw['epoch5mStartOld']?.toString(),
+            tapsSize: i('tapsSize') ?? _state.tapsSize,
+            oldTapsSize: i('oldTapsSize') ?? _state.oldTapsSize,
+            modifiedTapSum: raw['modifiedTapSum']?.toString(),
+            miningDurSum: raw['miningDurSum']?.toString(),
           ),
         );
         break;

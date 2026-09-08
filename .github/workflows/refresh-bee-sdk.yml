@@ -48,6 +48,12 @@ jobs:
           title: 'chore: refresh Bee Engine WASM SDK'
           commit-message: 'chore: refresh Bee Engine WASM SDK from ${{ inputs.ref }}'
           body: |
-            Rebuilt `assets/bee/pkg/` from `gosh-sh/bee-engine@${{ inputs.ref }}`.
+            Rebuilt `assets/bee/pkg/` from `gosh-sh/bee-engine@${{ inputs.ref }}`
+            with `tool/patch_bee_engine.py` applied (extends `MinerAccountData`
+            with the on-chain session/epoch fields the UI reads).
+
+            If the build failed on "MinerAccountData anchor not found", upstream
+            restructured that struct — update `tool/patch_bee_engine.py`.
+
             Review the wasm/js diff and check the APK still builds before merging.
           add-paths: assets/bee/pkg

@@ -97,9 +97,9 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
 
   String _notificationText(MinerState s) {
     final bal = s.gameBalance ?? s.nacklBalance ?? '—';
+    final reward = s.lastReward == null ? '' : ' · +${s.lastReward}';
     return switch (s.phase) {
-      MinerPhase.mining =>
-        'Mining · session ${s.sessionsCompleted} · $bal NACKL',
+      MinerPhase.mining => 'Mining · $bal NACKL$reward',
       MinerPhase.idle => 'Idle · $bal NACKL',
       MinerPhase.needsWallet => 'Tap to connect your Acki Nacki wallet',
       MinerPhase.crashed => 'Miner stopped — open the app',
@@ -251,14 +251,19 @@ class _SessionStatus extends StatelessWidget {
       'waiting' => 'waiting',
       _ => s.phase == MinerPhase.mining ? 'mining' : 'idle',
     };
-    final line = StringBuffer('Session ${s.sessionsCompleted} · $phase');
+    final line = StringBuffer(phase);
     if (s.sessionPhase == 'tapping') {
       line.write(' · ${s.tapsSent}/${BeeConfig.tapsPerSession} taps');
     } else if (s.confirmed > 0) {
       line.write(' · +${s.confirmed} confirmed');
     }
-    if (s.epochBudget > 0) {
-      line.write(' · epoch ${s.epochTaps}/${s.epochBudget}');
+    // On-chain figures (not local counters): taps this era, sessions this
+    // 5-min epoch.
+    if (s.tapSum != null) {
+      line.write(' · ${s.tapSum} epoch taps');
+    }
+    if (s.tapsSize > 0) {
+      line.write(' · ${s.tapsSize} sessions');
     }
     final frac =
         s.sessionPhase == 'tapping'

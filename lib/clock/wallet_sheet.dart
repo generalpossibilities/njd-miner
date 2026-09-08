@@ -176,9 +176,26 @@ class _WalletSheetState extends State<WalletSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _balanceRow('Mining rewards (locked)', state.gameBalance, strong: true),
+        _balanceRow(
+          'Last reward',
+          state.lastReward == null ? null : '+${state.lastReward}',
+        ),
         _balanceRow('Liquid (unlocked)', state.nacklBalance),
-        _balanceRow('Mining / game bucket', state.gameBalance),
-        _balanceRow('Taps this epoch', '${state.tapSum5m}'),
+        const Divider(color: Colors.white12, height: 20),
+        const Text(
+          'On-chain miner state',
+          style: TextStyle(color: Colors.white38, fontSize: 11),
+        ),
+        const SizedBox(height: 4),
+        _balanceRow('Epoch taps (since era start)', state.tapSum),
+        _balanceRow('Taps this 5-min epoch', '${state.tapSum5m}'),
+        _balanceRow('Sessions this 5-min epoch', '${state.tapsSize}'),
+        _balanceRow(
+          'Reputation-weighted taps',
+          state.modifiedTapSum,
+        ),
+        _balanceRow('Mining-duration sum', state.miningDurSum),
         const SizedBox(height: 8),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -214,7 +231,7 @@ class _WalletSheetState extends State<WalletSheet> {
         if (state.balanceDebug != null) ...[
           const SizedBox(height: 16),
           const Text(
-            'Balance maps (which bucket holds locked rewards?)',
+            'Raw balance maps (diagnostic)',
             style: TextStyle(color: Colors.white38, fontSize: 11),
           ),
           const SizedBox(height: 4),
@@ -254,7 +271,7 @@ class _WalletSheetState extends State<WalletSheet> {
     );
   }
 
-  Widget _balanceRow(String label, String? value) {
+  Widget _balanceRow(String label, String? value, {bool strong = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
@@ -266,11 +283,11 @@ class _WalletSheetState extends State<WalletSheet> {
           ),
           Text(
             value ?? '—',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              fontFeatures: [FontFeature.tabularFigures()],
+            style: TextStyle(
+              color: strong ? const Color(0xFF6BE28B) : Colors.white,
+              fontSize: strong ? 16 : 14,
+              fontWeight: strong ? FontWeight.w700 : FontWeight.w500,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
         ],

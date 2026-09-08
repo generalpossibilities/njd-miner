@@ -26,7 +26,7 @@ These are structural constraints, not TODOs — they shape what this app can be.
 |---|---|---|
 | 1 | **Bee Engine has no Flutter/native SDK.** It ships only as a browser-WASM bundle (`@teamgosh/bee-sdk`, built from the [`gosh-sh/bee-engine`](https://github.com/gosh-sh/bee-engine) Rust workspace). It is **not on npm**. | This app runs the SDK inside a hidden `InAppWebView`. You must build the WASM yourself (see below). |
 | 2 | **The miner is single-threaded and cooperative** (a `spawn_local` future yielding to the JS event loop via `setTimeout`). No `SharedArrayBuffer`, so **no** COOP/COEP cross-origin-isolation headers are needed. | A plain localhost static server is enough. But… |
-| 3 | **Chromium freezes WebView JS timers when the activity isn't visible.** A background isolate (`flutter_foreground_task`) cannot host a WebView either. | **Mining only happens while the clock is on screen.** That's why this is a *screen-on desk clock*, not a silent background miner. The foreground service only buys process priority + the required notification. |
+| 3 | **Chromium freezes WebView JS timers when the activity isn't visible.** A background isolate (`flutter_foreground_task`) cannot host a WebView either. **Battery / "unrestricted" settings do not change this** — it is a Chromium rendering rule, not an OS power-management decision. | **Mining only happens while the clock (or the floating overlay) is on screen and the screen is on.** That's why this is a *screen-on desk clock*, not a silent background miner. The foreground service only buys process priority + the required notification. True 24/7 mining needs a **cloud miner** running `@teamgosh/bee-sdk` in Node (see `dexchatsminermulti/backend/` for a working example), independent of the phone. |
 | 4 | **Google Play prohibits on-device cryptocurrency mining** (Developer Program Policy). | Distribution is **sideload / APK / F-Droid only**. Do not expect to ship this on Play. |
 | 5 | **`bee-engine` is AGPL-3.0.** Linking it into this app has copyleft implications for the combined work. | Get your own legal read before distributing. This repo's own code is otherwise yours to license. |
 | 6 | **`app_dapp_id`** is issued by the Acki Nacki team. This repo is set to `0x…0019` (`lib/config/bee_config.dart`). | If mining attributes nothing, re-confirm the id and network with the team. |
@@ -201,6 +201,18 @@ its visual style inspired by the Apache-2.0 `digital_clock` entry in
 Wallet sheet → **Floating clock** toggle (needs "display over other apps"). It
 shows a small draggable clock on top of every app via `flutter_overlay_window`.
 
+> **This is an always-on-*top* overlay, not a wallpaper-style clock.** Android
+> has exactly one window type an ordinary app may use for this
+> (`TYPE_APPLICATION_OVERLAY`) and it renders **above** other apps — there is no
+> app window type that sits *below* running apps (only the live wallpaper does,
+> and a wallpaper cannot host this WebView or run the miner). A clock that is
+> visible on the home screen and gets **covered** when you open an app is an
+> Android **home-screen AppWidget** — this repo ships one
+> (`ClockWidgetProvider`), but an AppWidget is `RemoteViews` and **cannot run
+> WASM**, so it displays time + last-known balance only and does not mine.
+> Mining always needs a visible Flutter/WebView surface: the full-screen clock
+> or this overlay.
+
 The overlay runs in its **own** Flutter engine, so it builds its own
 `WebViewBeeMiner`. Same process + same `http://127.0.0.1` origin ⇒ that WebView
 reads the wallet session and mining keys the main app stored. **Single-miner
@@ -228,15 +240,35 @@ git-ignored) — not from the official docs, which don't publish them.
 
 Per-session flow (`runSessionLoop` in `runner.js`): `Miner.new` → `can_start` →
 read `tap_sum` → `start(330 s)` → auto-tap ~70× (stop early to avoid "No running
-workers") → `stop` → wait for `session_accepted` → read `tap_sum` again →
-`confirmed = after − before` → `get_reward` → `free` → idle 5–8 s → repeat.
+workers") → `stop` → wait for the proof to submit (**cap ~60 s** — *not* for a
+`session_accepted` event; see below) → poll `tap_sum` until it climbs →
+`confirmed = after − before` → `get_reward` → `free` → idle 2–5 s → repeat.
 `confirmed` is what counts, not taps sent.
 
-**Locked vs liquid balance:** `get_multifactor_balances` returns `ecc` (liquid)
-and `popitgame` (candidate for the locked mining bucket). We don't have
-confirmation which holds mining rewards, so the wallet sheet dumps every balance
-map (`ecc` / `popitgame` / `tokens`) for a one-time check — see the debug box
-when a wallet is connected. The status bar prefers `popitgame` when present.
+**Reward cadence (~6 min, not 5).** One reward epoch is ~1000 blocks ≈ 5.5 min,
+so the ideal is one confirmed session per epoch. The 70 taps alone take ~4.7 min
+(70 × 4 s), and `Miner.new` each cycle can't overlap a pending submission, so
+the realistic floor with a fresh miner per session is **~6 min/reward**. The old
+code sat ~10 min because it blocked up to 180 s waiting for a `session_accepted`
+event that rides the (currently flaky) GraphQL events API. The runner no longer
+waits on that event — the reward accrues on-chain regardless; it just watches
+`tap_sum` climb and calls `get_reward()`. Getting under ~5.5 min would need
+reusing one `Miner` instance across sessions or a cloud miner.
+
+**Locked vs liquid balance (confirmed):** `get_multifactor_balances` returns
+`ecc["1"]` (liquid/unlocked NACKL) and `popitgame["1"]` (**locked mining
+rewards** — the headline number). The runner diffs successive `popitgame` reads
+in BigInt to surface the **last reward** that landed. The wallet sheet still
+dumps the raw maps as a diagnostic.
+
+**On-chain miner state.** `get_miner_data()` (extended `MinerAccountData`, needs
+the rebuilt WASM) exposes `_tapSum` (taps this 24 h era — shown as "epoch
+taps"), `_tapSum5m` (taps this 5-min epoch), `_tapsSize` (sessions this 5-min
+epoch), `_modifiedTapSum` (reputation-weighted), `_miningDurSum`. These are the
+on-chain figures the clock and wallet sheet show instead of local counters. The
+contract has no single "sessions this 24 h" field; the reset behaviour of each
+field is logged per session (`adb logcat | grep 'bee.*miner_data'`) to confirm
+the labels against real data.
 
 ## Troubleshooting
 
