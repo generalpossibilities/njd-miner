@@ -104,7 +104,7 @@ Not yet exercised:
 | Job | Runner | Output |
 |---|---|---|
 | `check` | ubuntu | `flutter analyze` + `flutter test` |
-| `android` | ubuntu | `njd-miner-apk` artifact — per-ABI + universal release APKs |
+| `android` | ubuntu | `njd-miner-apk` artifact — one universal `njd-miner.apk` |
 | `ios` | macos-14 | `njd-miner-ios-unsigned` artifact — unsigned `.ipa` |
 | `release` | ubuntu | on a `v*` tag, attaches both to a GitHub Release |
 
@@ -193,6 +193,17 @@ its visual style inspired by the Apache-2.0 `digital_clock` entry in
 `flutter/samples`.
 
 ---
+
+## Troubleshooting
+
+**"WebView load error … cleartext" / miner never leaves "Loading Bee Engine…"**
+The SDK is served over `http://127.0.0.1`; Android 9+ blocks cleartext by
+default. `android/app/src/main/res/xml/network_security_config.xml` whitelists
+loopback — make sure the manifest still points `android:networkSecurityConfig`
+at it.
+
+**Errors on the clock face** — a red banner shows the failure (selectable text,
+plus a Retry). `adb logcat | grep bee-webview` shows the WebView console.
 
 ## Anti-abuse note
 

@@ -30,7 +30,7 @@ class WebViewBeeMiner implements BeeMiner {
   );
 
   InAppWebViewController? _controller;
-  final Completer<void> _webViewReady = Completer<void>();
+  Completer<void> _webViewReady = Completer<void>();
 
   final _stateController = StreamController<MinerState>.broadcast();
   MinerState _state = MinerState.initial;
@@ -54,17 +54,18 @@ class WebViewBeeMiner implements BeeMiner {
     'http://${BeeConfig.localHost}:${BeeConfig.localPort}/index.html',
   );
 
-  /// The widget the app must keep mounted somewhere offstage. Sized 1x1 and
-  /// wrapped in `Offstage` by the caller; kept in the tree so JS keeps running.
+  /// The Bee Engine host WebView. The caller keeps it mounted full-size at the
+  /// bottom of the widget stack (hidden by the opaque clock) so Android keeps
+  /// its JS running.
   InAppWebView buildOffstageHost() {
     return InAppWebView(
       initialSettings: InAppWebViewSettings(
         isInspectable: kDebugMode,
         mediaPlaybackRequiresUserGesture: false,
         javaScriptEnabled: true,
-        // The SDK talks to Acki Nacki nodes over https from the localhost origin.
-        allowUniversalAccessFromFileURLs: true,
-        allowFileAccessFromFileURLs: true,
+        transparentBackground: true,
+        // http:// loopback origin calling https:// Acki Nacki nodes.
+        mixedContentMode: MixedContentMode.MIXED_CONTENT_ALWAYS_ALLOW,
       ),
       onWebViewCreated: (controller) async {
         _controller = controller;
@@ -72,23 +73,56 @@ class WebViewBeeMiner implements BeeMiner {
           handlerName: 'beeEvent',
           callback: (args) => _onBeeEvent(args.isNotEmpty ? args.first : null),
         );
-        if (!_server.isRunning()) {
-          await _server.start();
+        try {
+          if (!_server.isRunning()) {
+            await _server.start();
+          }
+          await controller.loadUrl(
+            urlRequest: URLRequest(url: WebUri.uri(_indexUri)),
+          );
+        } catch (e) {
+          _set(
+            _state.copyWith(
+              phase: MinerPhase.crashed,
+              error: 'localhost server failed: $e',
+            ),
+          );
         }
-        await controller.loadUrl(
-          urlRequest: URLRequest(url: WebUri.uri(_indexUri)),
-        );
       },
       onLoadStop: (controller, url) async {
         if (!_webViewReady.isCompleted) _webViewReady.complete();
       },
+      onReceivedError: (controller, request, error) {
+        debugPrint(
+          '[bee-webview] load error ${error.type}: ${error.description}',
+        );
+        if (request.isForMainFrame ?? false) {
+          if (!_webViewReady.isCompleted) _webViewReady.complete();
+          _set(
+            _state.copyWith(
+              phase: MinerPhase.crashed,
+              error:
+                  'WebView load error: ${error.description} '
+                  '(is http://127.0.0.1 reachable? cleartext allowed?)',
+            ),
+          );
+        }
+      },
+      onReceivedHttpError: (controller, request, response) {
+        debugPrint(
+          '[bee-webview] http ${response.statusCode} for ${request.url}',
+        );
+      },
       onConsoleMessage: (controller, msg) {
-        if (kDebugMode) {
-          debugPrint('[bee-webview] ${msg.messageLevel}: ${msg.message}');
+        debugPrint('[bee-webview] ${msg.messageLevel}: ${msg.message}');
+        if (msg.messageLevel == ConsoleMessageLevel.ERROR) {
+          _lastConsoleError = msg.message;
         }
       },
     );
   }
+
+  String? _lastConsoleError;
 
   Future<T> _call<T>(String expression) async {
     await _webViewReady.future;
@@ -106,7 +140,9 @@ class WebViewBeeMiner implements BeeMiner {
       ''',
     );
     if (result?.error != null) {
-      throw StateError('bee call failed: ${result!.error}');
+      final detail =
+          _lastConsoleError != null ? ' (console: $_lastConsoleError)' : '';
+      throw StateError('bee call failed: ${result!.error}$detail');
     }
     return result?.value as T;
   }
@@ -168,6 +204,27 @@ class WebViewBeeMiner implements BeeMiner {
   @override
   Future<void> refreshBalance() =>
       _call<void>('await window.Bee.refreshBalance();');
+
+  @override
+  Future<void> reload() async {
+    _lastConsoleError = null;
+    if (!_webViewReady.isCompleted) {
+      // nothing loaded yet — nothing to reload
+    } else {
+      _webViewReady = Completer<void>();
+    }
+    try {
+      if (!_server.isRunning()) await _server.start();
+      await _controller?.loadUrl(
+        urlRequest: URLRequest(url: WebUri.uri(_indexUri)),
+      );
+      await initialize();
+    } catch (e) {
+      _set(
+        _state.copyWith(phase: MinerPhase.crashed, error: 'reload failed: $e'),
+      );
+    }
+  }
 
   @override
   Future<void> dispose() async {

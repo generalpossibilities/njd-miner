@@ -123,5 +123,9 @@ abstract class BeeMiner {
   /// Refresh the NACKL balance now.
   Future<void> refreshBalance();
 
+  /// Reload the underlying host and re-run [initialize] — used by the on-screen
+  /// "Retry" after a crash.
+  Future<void> reload();
+
   Future<void> dispose();
 }

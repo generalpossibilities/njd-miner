@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Bee Engine SDK is served over plain HTTP from an in-app loopback server
+  (InAppLocalhostServer, http://127.0.0.1:8737). Android 9+ blocks cleartext
+  traffic by default, which would make the hidden WebView fail to load and the
+  miner never start. Permit cleartext for loopback only; everything else stays
+  HTTPS-only.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+</network-security-config>

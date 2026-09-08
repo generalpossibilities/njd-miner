@@ -39,19 +39,14 @@ class _NjdMinerAppState extends State<NjdMinerApp> {
       ),
       home: WithForegroundTask(
         child: Stack(
+          fit: StackFit.expand,
           children: [
+            // The Bee Engine host runs full-size at the bottom of the stack so
+            // Android actually lays it out and keeps its JS timers alive; the
+            // opaque clock on top hides it. (A 1x1 / offstage WebView gets
+            // throttled or never initialises on some devices.)
+            IgnorePointer(child: _miner.buildOffstageHost()),
             DigitalClockScreen(miner: _miner),
-            // The Bee Engine host. Must stay in the tree (JS timers freeze in a
-            // detached WebView) but is 1x1 and behind everything.
-            Positioned(
-              width: 1,
-              height: 1,
-              left: 0,
-              bottom: 0,
-              child: IgnorePointer(
-                child: Opacity(opacity: 0, child: _miner.buildOffstageHost()),
-              ),
-            ),
           ],
         ),
       ),

@@ -169,6 +169,11 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
                   ),
                 ),
               ),
+              if (_miner.phase == MinerPhase.crashed && _miner.error != null)
+                _ErrorBanner(
+                  message: _miner.error!,
+                  onRetry: () => widget.miner.reload(),
+                ),
               if (_miner.isMining || _miner.phase == MinerPhase.idle)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -193,6 +198,44 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Full-width red banner shown when the miner is in [MinerPhase.crashed].
+/// Text is selectable so the error can be copied out for a bug report.
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: const Color(0x22FF5252),
+        border: Border.all(color: const Color(0x55FF5252)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: SelectableText(
+              message,
+              style: const TextStyle(
+                color: Color(0xFFFFB4B4),
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ),
+          TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
       ),
     );
   }

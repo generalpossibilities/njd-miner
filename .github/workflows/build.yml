@@ -73,22 +73,21 @@ jobs:
           keyPassword=$KEY_PASSWORD
           EOF
 
-      - name: Build APKs
-        run: flutter build apk --release --split-per-abi --build-number ${{ github.run_number }}
-
-      - name: Build universal APK
+      # One universal APK — installs on every phone. (Per-ABI splits shave a few
+      # MB each but mean picking the right file; not worth it for sideloading.)
+      - name: Build APK
         run: flutter build apk --release --build-number ${{ github.run_number }}
 
-      - name: Print APK signer certificate (sanity)
-        if: always()
+      - name: Rename + verify signature
         run: |
-          f=$(ls build/app/outputs/flutter-apk/app-arm64-v8a-release.apk 2>/dev/null || ls build/app/outputs/flutter-apk/app-release.apk)
-          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$f" | grep -E "SHA-256|Signer" || true
+          cd build/app/outputs/flutter-apk
+          mv app-release.apk njd-miner.apk
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs njd-miner.apk | grep -E "SHA-256|Signer #1" || true
 
       - uses: actions/upload-artifact@v4
         with:
           name: njd-miner-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/flutter-apk/njd-miner.apk
           if-no-files-found: error
 
   ios:
