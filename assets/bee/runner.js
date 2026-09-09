@@ -119,6 +119,7 @@ const M = {
   epochStart: null, // _epochBigStart; reset budget when it changes
   errors: 0,
   lastGameRaw: null, // previous popitgame[slot] in nano, for the reward delta
+  lastRewardEpoch5m: null, // epoch_5m_start of the last successful get_reward
 };
 
 /** Shape a `get_miner_data()` result into the event payload the Dart side
@@ -165,23 +166,63 @@ async function getMinerAddress(walletName) {
   });
 }
 
+// ---- external-message discipline -------------------------------------
+//
+// Acki Nacki v0.19.1 replaced the single `ext_messages_cache_size` with
+// per-DApp and per-account queue limits, and dropped the per-account default
+// from 100 to 5 (node CHANGELOG). Every `cancel_session`, `submit_session_*`
+// and `get_reward` is an external message to *our* miner account, so a session
+// spends ~3-4 of that budget. Over it, the node answers 621 QUEUE_OVERFLOW
+// ("Message queue is full") and the SDK surfaces it wrapped — e.g.
+// "Cancel stale session data (KitError { … QUEUE_OVERFLOW … })".
+//
+// So: never have two of our own external messages in flight at once, and treat
+// a queue-full answer as transient with a *long* backoff (retrying fast just
+// spends more of the same budget).
+const isQueueFull = (e) => {
+  const s = String(e?.message || e);
+  return s.includes("QUEUE_OVERFLOW") || s.includes("Message queue is full");
+};
+
+let _txChain = Promise.resolve();
+/** Run `fn` after every previously queued external-message call has settled. */
+function tx(fn) {
+  const run = _txChain.then(fn, fn);
+  _txChain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
 async function newMiner(k) {
   await ensureSdk();
-  for (let r = 0; r < 3; r++) {
+  // `Miner.new` reads getDetails and, if a previous session left
+  // `submit_session_data` on-chain, sends a `cancel_session` external message —
+  // which is exactly what hits the per-account queue cap.
+  const delays = [20000, 40000, 80000];
+  for (let r = 0; ; r++) {
     try {
-      return await Miner.new(
-        CFG().endpoints,
-        CFG().appId,
-        k.minerAddress,
-        k.ownerPublic,
-        k.ownerSecret,
+      return await tx(() =>
+        Miner.new(
+          CFG().endpoints,
+          CFG().appId,
+          k.minerAddress,
+          k.ownerPublic,
+          k.ownerSecret,
+        ),
       );
     } catch (e) {
-      if (r < 2 && String(e?.message || e).includes("Failed to fetch")) {
-        await sleep((r + 1) * 5000);
-        continue;
-      }
-      throw e;
+      const s = String(e?.message || e);
+      const transient = isQueueFull(e) || s.includes("Failed to fetch");
+      if (!transient || r >= delays.length) throw e;
+      log("newMiner retry", `${r + 1}/${delays.length}`, s.slice(0, 160));
+      emitSession("waiting", {
+        reason: isQueueFull(e)
+          ? "network message queue full — backing off"
+          : "network unreachable — retrying",
+      });
+      await sleep(delays[r]);
     }
   }
 }
@@ -208,6 +249,21 @@ async function runSessionLoop() {
   const JITTER = cfg.tapJitterPct;
   const SUBMIT_STAGGER = cfg.submitStaggerMs;
 
+  // One `Miner` instance is reused across sessions. Its seed queue starts as
+  // [seed, next_seed] and the SDK's own event thread pushes another seed on
+  // every SeedUpdated, so a healthy instance keeps going. Reuse matters beyond
+  // saving the ~10 s of setup: every `Miner.new` re-reads getDetails and, if a
+  // session is still pending on-chain, spends an external message on
+  // `cancel_session` — the scarce resource since v0.19.1.
+  let miner = null;
+  const dropMiner = () => {
+    try {
+      miner?.free?.();
+    } catch {}
+    miner = null;
+    M.currentMiner = null;
+  };
+
   while (M.running) {
     const k = M.conn ? readKeys(M.conn) : null;
     if (!k?.areKeysPropagated || !k.minerAddress) {
@@ -221,24 +277,28 @@ async function runSessionLoop() {
       continue;
     }
 
-    let miner = null;
     try {
-      miner = await newMiner(k);
-      M.currentMiner = miner;
+      if (!miner) {
+        miner = await newMiner(k);
+        M.currentMiner = miner;
+      }
 
+      // Seeds exhausted (or a worker somehow still running): this instance is
+      // spent, so build a fresh one on the next pass.
       if (!(await miner.can_start())) {
-        emitSession("waiting", { reason: "can_start=false" });
-        miner.free?.();
-        M.currentMiner = null;
+        emitSession("waiting", { reason: "no seed available yet" });
+        dropMiner();
         await sleep(30000);
         continue;
       }
 
       // tap_sum before + epoch budget reset
       let tapBefore = 0;
+      let epoch5m = null;
       try {
         const d = await miner.get_miner_data();
         tapBefore = safeNum(d?.tap_sum);
+        epoch5m = d?.epoch_5m_start?.toString() ?? null;
         const es = d?.epoch_start?.toString() ?? null;
         if (es && es !== M.epochStart) {
           M.epochStart = es;
@@ -321,26 +381,33 @@ async function runSessionLoop() {
 
       // ── submit ────────────────────────────────────────────────
       // The 70 taps finish well inside the 330 s session, so stop the worker
-      // now and let it push its proof. Do NOT block here waiting for a
-      // `session_accepted` event — that event rides the GraphQL events API,
-      // which is unreliable, and waiting on it stretched every cycle to
-      // ~10 min (one reward epoch is only ~5.5 min). The reward accrues
-      // on-chain regardless; we notice the session landed by watching
-      // `tap_sum` climb, then call get_reward().
+      // now and let it submit. Two different waits follow, and the difference
+      // matters:
+      //
+      //  * `submit_session_proof` is emitted by the worker itself the moment
+      //    its send resolves — reliable, breaks early, so a long cap is free.
+      //    This is a HARD gate: abandoning the session here (or freeing the
+      //    miner, which kills the in-flight submission) is what strands
+      //    `submit_session_data` on-chain, and the next `Miner.new` then has to
+      //    spend an external message cancelling it.
+      //  * `session_accepted` arrives via the SDK's 2.5 s GraphQL event poll —
+      //    unreliable, so we never block on it. The reward accrues on-chain
+      //    regardless; `tap_sum` climbing is the signal we use instead.
       emitSession("submitting");
       await sleep(Math.random() * SUBMIT_STAGGER);
       try {
         miner.stop();
       } catch {}
 
-      // Let the worker push its proof — cap ~60 s, break as soon as the
-      // proof is in (or the session errored / came back empty).
       for (
         let w = 0;
-        w < 20 && M.running && !proofSubmitted && !sessionAccepted && !sessionErr && !sessionEmpty;
+        w < 60 && M.running && !proofSubmitted && !sessionErr && !sessionEmpty;
         w++
       ) {
         await sleep(3000);
+      }
+      if (!proofSubmitted && !sessionErr && !sessionEmpty) {
+        log("proof never confirmed within 180s — session may be left pending");
       }
 
       // tap_sum after — poll until it reflects this session (cap ~48 s).
@@ -349,6 +416,7 @@ async function runSessionLoop() {
         try {
           const d = await miner.get_miner_data();
           tapAfter = safeNum(d?.tap_sum);
+          epoch5m = d?.epoch_5m_start?.toString() ?? epoch5m;
           emitMinerData(d);
           d?.free?.();
           if (tapAfter > tapBefore) break;
@@ -361,14 +429,19 @@ async function runSessionLoop() {
       M.confirmed = confirmed;
       M.epochTaps += confirmed;
 
-      if (!sessionErr && !sessionEmpty) {
+      // `get_reward` is documented as pointless more than once per reward
+      // epoch (~1000 blocks), and it is one more external message against the
+      // per-account cap — so skip it if the 5-minute epoch hasn't rolled.
+      const rewardDue = !sessionErr && !sessionEmpty && (epoch5m == null || epoch5m !== M.lastRewardEpoch5m);
+      if (rewardDue) {
         for (let r = 0; r < 3; r++) {
           try {
-            await miner.get_reward();
+            await tx(() => miner.get_reward());
+            M.lastRewardEpoch5m = epoch5m;
             break;
           } catch (e) {
-            if (String(e?.message || e).includes("QUEUE_OVERFLOW") && r < 2) {
-              await sleep((r + 1) * 5000);
+            if (isQueueFull(e) && r < 2) {
+              await sleep((r + 1) * 20000);
             } else {
               log("get_reward", String(e?.message || e));
               break;
@@ -390,20 +463,24 @@ async function runSessionLoop() {
       window.Bee?.refreshBalance?.().catch(() => {});
       M.errors = 0;
 
-      miner.free?.();
-      M.currentMiner = null;
-      await sleep(2000 + Math.random() * cfg.sessionBoundaryJitterMs);
+      // Keep the miner: the next session reuses its seed queue.
+      if (sessionErr && isQueueFull({ message: sessionErr })) {
+        // The node is shedding our messages; give its queue room to drain
+        // before spending more of the per-account budget.
+        emitSession("waiting", { reason: "network message queue full — backing off" });
+        await sleep(60000);
+      } else {
+        await sleep(2000 + Math.random() * cfg.sessionBoundaryJitterMs);
+      }
     } catch (e) {
       M.errors++;
       emit("miner_error", { where: "session", error: String(e?.message || e) });
-      try {
-        miner?.free?.();
-      } catch {}
-      M.currentMiner = null;
+      dropMiner();
       await sleep(Math.min(15000 * 2 ** Math.min(M.errors - 1, 4), 120000));
     }
   }
 
+  dropMiner();
   M.loopAlive = false;
   emit("mining_stopped");
 }
@@ -555,7 +632,7 @@ window.Bee = {
     if (!k?.minerAddress) throw new Error("no miner");
     const miner = M.currentMiner ?? (await newMiner(k));
     try {
-      await miner.get_reward();
+      await tx(() => miner.get_reward());
       emit("reward_claimed");
       window.Bee.refreshBalance().catch(() => {});
     } finally {
@@ -660,6 +737,7 @@ window.Bee = {
     M.sessions = 0;
     M.epochTaps = 0;
     M.lastGameRaw = null;
+    M.lastRewardEpoch5m = null;
     writeKeys(M.conn, null);
     writeSession(null);
     M.conn = null;

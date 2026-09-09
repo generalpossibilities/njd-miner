@@ -248,7 +248,7 @@ class _SessionStatus extends StatelessWidget {
       'starting' => 'starting session',
       'tapping' => 'mining',
       'submitting' => 'submitting proof',
-      'waiting' => 'waiting',
+      'waiting' => s.sessionNote ?? 'waiting',
       _ => s.phase == MinerPhase.mining ? 'mining' : 'idle',
     };
     final line = StringBuffer(phase);
@@ -269,7 +269,11 @@ class _SessionStatus extends StatelessWidget {
         s.sessionPhase == 'tapping'
             ? (s.tapsSent / BeeConfig.tapsPerSession).clamp(0.0, 1.0)
             : null;
-    return _wrap(line.toString(), frac, const Color(0xFFFFC531));
+    final bar =
+        s.sessionPhase == 'waiting'
+            ? const Color(0xFFFFA000)
+            : const Color(0xFFFFC531);
+    return _wrap(line.toString(), frac, bar);
   }
 
   Widget _wrap(String text, double? frac, Color bar) {

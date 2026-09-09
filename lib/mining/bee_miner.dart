@@ -42,6 +42,7 @@ class MinerState {
     this.modifiedTapSum,
     this.miningDurSum,
     this.sessionPhase,
+    this.sessionNote,
     this.tapsSent = 0,
     this.confirmed = 0,
     this.epochTaps = 0,
@@ -102,6 +103,10 @@ class MinerState {
   /// `starting` | `tapping` | `submitting` | `idle` | `waiting`.
   final String? sessionPhase;
 
+  /// Why the loop is in its current sub-phase, when it has something to say —
+  /// e.g. "network message queue full — backing off". Null most of the time.
+  final String? sessionNote;
+
   /// Auto-taps sent in the current/last session.
   final int tapsSent;
 
@@ -133,6 +138,7 @@ class MinerState {
     String? modifiedTapSum,
     String? miningDurSum,
     String? sessionPhase,
+    Object? sessionNote = _sentinel,
     int? tapsSent,
     int? confirmed,
     int? epochTaps,
@@ -162,6 +168,10 @@ class MinerState {
       modifiedTapSum: modifiedTapSum ?? this.modifiedTapSum,
       miningDurSum: miningDurSum ?? this.miningDurSum,
       sessionPhase: sessionPhase ?? this.sessionPhase,
+      sessionNote:
+          identical(sessionNote, _sentinel)
+              ? this.sessionNote
+              : sessionNote as String?,
       tapsSent: tapsSent ?? this.tapsSent,
       confirmed: confirmed ?? this.confirmed,
       epochTaps: epochTaps ?? this.epochTaps,

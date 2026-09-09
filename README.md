@@ -247,13 +247,25 @@ workers") → `stop` → wait for the proof to submit (**cap ~60 s** — *not* f
 
 **Reward cadence (~6 min, not 5).** One reward epoch is ~1000 blocks ≈ 5.5 min,
 so the ideal is one confirmed session per epoch. The 70 taps alone take ~4.7 min
-(70 × 4 s), and `Miner.new` each cycle can't overlap a pending submission, so
-the realistic floor with a fresh miner per session is **~6 min/reward**. The old
-code sat ~10 min because it blocked up to 180 s waiting for a `session_accepted`
-event that rides the (currently flaky) GraphQL events API. The runner no longer
-waits on that event — the reward accrues on-chain regardless; it just watches
-`tap_sum` climb and calls `get_reward()`. Getting under ~5.5 min would need
-reusing one `Miner` instance across sessions or a cloud miner.
+(70 × 4 s). The old code sat ~10 min because it blocked up to 180 s waiting for a
+`session_accepted` event that rides the (flaky) GraphQL events API. The runner no
+longer waits on that event — the reward accrues on-chain regardless; it watches
+`tap_sum` climb instead.
+
+**Two waits, and the difference matters.** `session_accepted` arrives via the
+SDK's 2.5 s `query_events` GraphQL poll — unreliable, so never block on it.
+`submit_session_proof` is emitted by the worker itself the moment its send
+resolves — reliable and early, so the runner *does* gate on it (cap 180 s, free
+in the happy path). That gate is load-bearing: abandoning a session after the
+root submitted but before the proof did leaves `submit_session_data` set
+on-chain, and the next `Miner.new` then has to spend an external message
+cancelling it — see the queue budget below.
+
+**One `Miner`, many sessions.** The instance's seed queue starts as
+`[seed, next_seed]` and the SDK's event thread pushes another on every
+`SeedUpdated`, so the runner reuses one instance while `can_start()` holds and
+only rebuilds when the seeds run dry. Each avoided `Miner.new` is one avoided
+`getDetails` round-trip and one avoided `cancel_session` message.
 
 **Locked vs liquid balance (confirmed):** `get_multifactor_balances` returns
 `ecc["1"]` (liquid/unlocked NACKL) and `popitgame["1"]` (**locked mining
@@ -269,6 +281,48 @@ on-chain figures the clock and wallet sheet show instead of local counters. The
 contract has no single "sessions this 24 h" field; the reset behaviour of each
 field is logged per session (`adb logcat | grep 'bee.*miner_data'`) to confirm
 the labels against real data.
+
+## The external-message budget (Acki Nacki v0.19.1)
+
+Since **v0.19.1** (2026-08-26) the node no longer has one flat message cache. It
+tracks the external-message queue per DApp *and per account*, and the
+per-account default was cut hard — from the node CHANGELOG:
+
+> Changed the default external-message queue limits in the `block-keeper`
+> Ansible role: `EXT_MESSAGES_TOTAL_LIMIT` 250 → 1000, `EXT_MESSAGES_DAPP_LIMIT`
+> 200 → 500, **`EXT_MESSAGES_ACCOUNT_LIMIT` 100 → 5**. A deployment needing a
+> wider per-account allowance has to set the variable in its inventory.
+
+Every `cancel_session`, `submit_session_root`, `submit_session_proof` and
+`get_reward` is an external message to **your** miner contract account, so one
+session spends 3–4 of that budget. Over it, the node answers TVM error **621
+`QUEUE_OVERFLOW`** — "Message queue is full. Please try to send the message
+later." The SDK wraps it, so it surfaces as e.g.:
+
+```
+Cancel stale session data (KitError { module: MvSystem(Miner), code: -1,
+  message: Send message, tvm_erorr Some(ClientError(... code: 621,
+  "Message queue is full. Please try to send the message later." ...
+```
+
+What `runner.js` does about it:
+
+| Measure | Why |
+|---|---|
+| `tx()` serialises every SDK call that sends an external message | never two of ours in flight at once |
+| `newMiner()` retries 621 at **20 / 40 / 80 s** | it is transient; retrying *fast* just spends more of the same budget |
+| Hard `submit_session_proof` gate before reusing/freeing the miner | stops us stranding a session that then needs a `cancel_session` |
+| `Miner` instance reuse | removes most `Miner.new` → most `cancel_session` attempts |
+| `get_reward` at most once per ~5-min reward epoch | the docs say more often is pointless; it is one message saved |
+| 621 is shown as "Network message queue full — retrying", **not** a crash | it is the network shedding load, and the runner recovers on its own |
+
+This is a client-side mitigation, not a cure. The error text doesn't say *which*
+limit tripped, and the miner account sits under `dapp_id …0001` — if every Bee
+miner contract shares that DApp, the binding limit may be the DApp-wide 500
+rather than your own 5, in which case only backoff helps and it will come and go
+with network load. `node_ext_msg_queue_size_by_dapp` is node-side only, so a
+client cannot tell the two apart. Since ~4 messages per session is inherent to
+the Bee mining flow, this affects **every** Bee miner — worth raising upstream.
 
 ## Troubleshooting
 

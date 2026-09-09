@@ -257,6 +257,11 @@ class WebViewBeeMiner implements BeeMiner {
 
   // ---- event handling ------------------------------------------------
 
+  /// Acki Nacki answers an over-quota external message with TVM error 621.
+  /// The SDK wraps it, so match on the payload text rather than a code.
+  static bool _isQueueFull(String s) =>
+      s.contains('QUEUE_OVERFLOW') || s.contains('Message queue is full');
+
   void _onBeeEvent(dynamic raw) {
     if (raw is! Map) return;
     final type = raw['type'] as String?;
@@ -321,6 +326,7 @@ class WebViewBeeMiner implements BeeMiner {
           _state.copyWith(
             phase: MinerPhase.mining,
             sessionPhase: raw['phase']?.toString(),
+            sessionNote: raw['reason']?.toString(),
             sessionsCompleted: i('n'),
             tapsSent: i('tapsSent'),
             confirmed: i('confirmed'),
@@ -380,12 +386,26 @@ class WebViewBeeMiner implements BeeMiner {
         _set(_state.copyWith(message: 'Reward claimed'));
         break;
       case 'miner_error':
-        _set(
-          _state.copyWith(
-            phase: MinerPhase.crashed,
-            error: '${raw['where']}: ${raw['error']}',
-          ),
-        );
+        final detail = raw['error']?.toString() ?? '';
+        // A full node message queue is the network shedding load, not a crash.
+        // Acki Nacki v0.19.1 caps queued external messages per account, and the
+        // runner already backs off and retries — so keep mining and just say so.
+        if (_isQueueFull(detail)) {
+          _set(
+            _state.copyWith(
+              sessionPhase: 'waiting',
+              sessionNote: 'Network message queue full — retrying',
+              message: 'Network busy — the miner is backing off and will retry',
+            ),
+          );
+        } else {
+          _set(
+            _state.copyWith(
+              phase: MinerPhase.crashed,
+              error: '${raw['where']}: $detail',
+            ),
+          );
+        }
         break;
       case 'disconnected':
         _set(const MinerState(phase: MinerPhase.needsWallet));
