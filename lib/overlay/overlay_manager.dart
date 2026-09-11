@@ -4,7 +4,31 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 import '../mining/bee_miner.dart';
+import 'app_control.dart';
 import 'overlay_link.dart';
+
+/// The sizes the floating clock can be cycled through.
+///
+/// [tiny] is deliberately small enough to be little more than the time — the
+/// point of the floating clock is to sit over another app without taking it
+/// over. The overlay also hosts the mining WebView offstage, which keeps
+/// running at any of these sizes because the work is JavaScript, not layout.
+enum OverlaySize {
+  tiny(width: 132, height: 64),
+  small(width: 300, height: 108),
+  normal(width: 620, height: 220);
+
+  const OverlaySize({required this.width, required this.height});
+
+  final int width;
+  final int height;
+
+  OverlaySize get next => switch (this) {
+    OverlaySize.normal => OverlaySize.small,
+    OverlaySize.small => OverlaySize.tiny,
+    OverlaySize.tiny => OverlaySize.normal,
+  };
+}
 
 /// Main-app side of the floating clock. Owns the show/hide toggle and keeps the
 /// single-miner rule: while the overlay is up **and** its own WebView works,
@@ -39,8 +63,8 @@ class OverlayManager extends ChangeNotifier {
     if (!await ensurePermission()) return;
     _link ??= FlutterOverlayWindow.overlayListener.listen(_onOverlayMessage);
     await FlutterOverlayWindow.showOverlay(
-      height: 220,
-      width: 620,
+      height: OverlaySize.normal.height,
+      width: OverlaySize.normal.width,
       alignment: OverlayAlignment.topCenter,
       flag: OverlayFlag.defaultFlag,
       enableDrag: true,
@@ -49,6 +73,10 @@ class OverlayManager extends ChangeNotifier {
       overlayContent: 'Floating clock',
     );
     _active = true;
+    // The overlay engine only exists once showOverlay has run, so the app-control
+    // channel can only be registered on it now. Without this the restore button
+    // inside the overlay has no handler.
+    await AppControl.attachOverlayBridge();
     notifyListeners();
   }
 

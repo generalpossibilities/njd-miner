@@ -7,7 +7,9 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import '../config/bee_config.dart';
 import '../mining/bee_miner.dart';
 import '../mining/webview_bee_miner.dart';
+import 'app_control.dart';
 import 'overlay_link.dart';
+import 'overlay_manager.dart';
 
 /// The floating always-on-top clock. Runs in the overlay isolate (a separate
 /// FlutterEngine), so it builds its **own** [WebViewBeeMiner]. Because both
@@ -26,6 +28,28 @@ class OverlayClock extends StatefulWidget {
 
 class _OverlayClockState extends State<OverlayClock> {
   static const Duration _probeTimeout = Duration(seconds: 12);
+
+  /// Current window size. The overlay starts at whatever showOverlay asked for.
+  OverlaySize _size = OverlaySize.normal;
+
+  /// Set when reopening the app failed, so the button is not silently dead.
+  bool _restoreFailed = false;
+
+  Future<void> _cycleSize() async {
+    final next = _size.next;
+    await FlutterOverlayWindow.resizeOverlay(next.width, next.height, true);
+    if (mounted) setState(() => _size = next);
+  }
+
+  Future<void> _restoreApp() async {
+    final ok = await AppControl.bringAppToFront();
+    if (!ok && mounted) {
+      // The bridge is registered on the overlay engine by the main app right
+      // after showOverlay; if that did not happen the call is a no-op. There is
+      // no Scaffold here to show a SnackBar in, so surface it on the clock.
+      setState(() => _restoreFailed = true);
+    }
+  }
 
   final WebViewBeeMiner _miner = WebViewBeeMiner();
   MinerState _state = MinerState.initial;
@@ -153,43 +177,94 @@ class _OverlayClockState extends State<OverlayClock> {
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: const Color(0x22FFFFFF)),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: EdgeInsets.symmetric(
+                horizontal: _size == OverlaySize.tiny ? 8 : 14,
+                vertical: _size == OverlaySize.tiny ? 4 : 10,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         _hhmm,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Colors.white,
-                          fontSize: 30,
+                          // At tiny the clock is most of the window, so the time
+                          // shrinks with it rather than overflowing.
+                          fontSize: _size == OverlaySize.tiny ? 20 : 30,
                           fontWeight: FontWeight.w200,
-                          fontFeatures: [FontFeature.tabularFigures()],
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       Icon(
                         mining ? Icons.bolt : Icons.bolt_outlined,
-                        size: 16,
+                        size: 14,
                         color:
                             mining ? const Color(0xFF6BE28B) : Colors.white38,
                       ),
+                      const Spacer(),
+                      // Reopen the app. With the main body minimised the clock
+                      // is the only thing on screen, and there was no way back
+                      // without finding the launcher icon.
+                      _iconButton(
+                        _restoreFailed
+                            ? Icons.error_outline
+                            : Icons.open_in_full,
+                        _restoreFailed ? 'Could not reopen app' : 'Reopen app',
+                        _restoreApp,
+                      ),
+                      _iconButton(
+                        _size == OverlaySize.normal
+                            ? Icons.close_fullscreen
+                            : Icons.aspect_ratio,
+                        'Resize',
+                        _cycleSize,
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _displayOnly
-                        ? 'display only · tap sends to app'
-                        : '$taps / ${BeeConfig.tapsPerEpochTarget} taps · ${_state.gameBalance ?? _state.nacklBalance ?? '—'}',
-                    style: const TextStyle(color: Colors.white54, fontSize: 10),
-                  ),
+                  // The status line is the first thing to go when the window is
+                  // too small to carry it.
+                  if (_size != OverlaySize.tiny) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      _displayOnly
+                          ? 'display only · tap sends to app'
+                          : '$taps / ${BeeConfig.tapsPerEpochTarget} taps · ${_state.gameBalance ?? _state.nacklBalance ?? '—'}',
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 10,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Small tap target that does not swallow the tap-to-mine gesture behind it.
+  Widget _iconButton(IconData icon, String tooltip, VoidCallback onTap) {
+    // GestureDetector, not InkWell: the overlay's home is a bare Stack with no
+    // Material ancestor, and InkWell would throw at runtime looking for one.
+    // opaque so the tap does not fall through to the tap-to-mine handler behind.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Icon(icon, size: 14, color: Colors.white54),
+        ),
       ),
     );
   }
