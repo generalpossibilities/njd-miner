@@ -257,13 +257,22 @@ class _SessionStatus extends StatelessWidget {
     } else if (s.confirmed > 0) {
       line.write(' · +${s.confirmed} confirmed');
     }
-    // On-chain figures (not local counters): taps this era, sessions this
-    // 5-min epoch.
+    // On-chain figure (not a local counter): taps this era.
     if (s.tapSum != null) {
       line.write(' · ${s.tapSum} epoch taps');
     }
-    if (s.tapsSize > 0) {
-      line.write(' · ${s.tapsSize} sessions');
+    // Two different session counts, and conflating them read as a broken
+    // counter: `sessionsCompleted` is the running total this run, while
+    // `tapsSize` is the on-chain count for the current ~5-minute reward epoch
+    // and so drops back to zero every epoch. Show both, each labelled for what
+    // it is, rather than only the one that keeps resetting.
+    if (s.sessionsCompleted > 0) {
+      line.write(' · ${s.sessionsCompleted} sessions');
+      if (s.tapsSize > 0) {
+        line.write(' (${s.tapsSize} this epoch)');
+      }
+    } else if (s.tapsSize > 0) {
+      line.write(' · ${s.tapsSize} sessions this epoch');
     }
     final frac =
         s.sessionPhase == 'tapping'
