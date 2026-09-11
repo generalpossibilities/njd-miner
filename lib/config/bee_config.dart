@@ -45,6 +45,14 @@ class BeeConfig {
   /// Stagger before submitting session results (desyncs WASM submit calls).
   static const int submitStaggerMs = 5000;
 
+  /// Offset between starting each wallet's mining loop, when several wallets
+  /// mine at once. Actual delay is [walletStartStaggerMs] + rand(0..same).
+  ///
+  /// Wallets are offset at *start*, not only at submit: begin them together and
+  /// they stay in lockstep, hitting the node on the same phase boundary every
+  /// session, which submit-time jitter alone cannot undo.
+  static const int walletStartStaggerMs = 1500;
+
   /// Extra idle between sessions: 5s + rand(0..[sessionBoundaryJitterMs]).
   static const int sessionBoundaryJitterMs = 3000;
 

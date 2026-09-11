@@ -171,6 +171,7 @@ class WebViewBeeMiner implements BeeMiner {
       'tapIntervalMs': BeeConfig.tapIntervalMs,
       'tapJitterPct': BeeConfig.tapJitterPct,
       'submitStaggerMs': BeeConfig.submitStaggerMs,
+      'walletStartStaggerMs': BeeConfig.walletStartStaggerMs,
       'sessionBoundaryJitterMs': BeeConfig.sessionBoundaryJitterMs,
       'maxTapsPerEpoch': BeeConfig.maxTapsPerEpoch,
       'connectSessionTtlSec': BeeConfig.connectSessionTtlSec,
