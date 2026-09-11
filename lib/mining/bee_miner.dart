@@ -210,7 +210,13 @@ abstract class BeeMiner {
 
   /// Begin (or resume) the wallet-connect handshake. Returns null if a wallet is
   /// already connected.
-  Future<WalletConnectRequest?> connectWallet();
+  /// Begin connecting a wallet. Returns null when there is nothing to do
+  /// because a wallet is already set up.
+  ///
+  /// Pass [addAnother] to connect an *additional* wallet: that skips the
+  /// already-connected short-circuit, which otherwise makes "Add wallet" a
+  /// no-op that falls through to authorising the wallet you already had.
+  Future<WalletConnectRequest?> connectWallet({bool addAnother = false});
 
   /// Generate mining keys and ask the connected wallet to write them to the
   /// Miner contract, then wait for on-chain propagation.
@@ -236,6 +242,16 @@ abstract class BeeMiner {
   Future<void> refreshBalance();
 
   /// Disconnect the wallet: stop mining, revoke the session, clear stored keys.
+  /// Wallets the runner knows about: {walletId, walletName, keysReady}.
+  /// More than one can mine at once; [selectedWalletId] is the one whose state
+  /// [states] describes.
+  List<Map<String, dynamic>> get wallets => const [];
+  String? get selectedWalletId => null;
+
+  /// Point the UI at [walletId]. Mining on the other wallets is unaffected.
+  Future<void> selectWallet(String walletId) async {}
+
+  /// Disconnect the selected wallet. The others keep mining.
   Future<void> disconnect();
 
   /// Reload the underlying host and re-run [initialize] — used by the on-screen

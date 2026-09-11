@@ -23,6 +23,7 @@ import init, {
 const CFG = () => window.__BEE_CFG;
 
 const SESSION_KEY = "njd_miner_session_v1";
+const SESSIONS_KEY = "njd_miner_sessions_v2";
 const KEYS_PREFIX = "njd_miner_mining_keys_v1";
 
 const logEl = document.getElementById("log");
@@ -52,16 +53,64 @@ window.addEventListener("flutter_inappwebview_platform_ready", _flush);
 setInterval(_flush, 1000); // cheap safety net for the life of the page
 
 // ---- storage -------------------------------------------------------------
-function readSession() {
-  try {
-    return JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
-  } catch {
-    return null;
-  }
+// ---- wallet storage -----------------------------------------------------
+//
+// v1 stored a single connected wallet under SESSION_KEY. v2 stores a list, so
+// several wallets can mine at once. The v1 key is migrated on first read and
+// then left alone: an install that downgrades still finds its wallet, and an
+// upgrade never lands on the connect screen having silently lost it.
+//
+// KEYS_PREFIX entries are untouched — keysKey() already keys them by
+// profileAddress:appId, so per-wallet mining keys were always multi-wallet
+// ready and migrate for free.
+function walletId(conn) {
+  return conn?.profileAddress || conn?.walletName || null;
 }
-function writeSession(s) {
-  if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+
+function readSessions() {
+  let list = null;
+  try {
+    list = JSON.parse(localStorage.getItem(SESSIONS_KEY) || "null");
+  } catch {
+    list = null;
+  }
+  if (Array.isArray(list)) return list.filter(Boolean);
+
+  // migrate v1 -> v2
+  let one = null;
+  try {
+    one = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+  } catch {
+    one = null;
+  }
+  const migrated = one ? [one] : [];
+  if (one) writeSessions(migrated);
+  return migrated;
+}
+
+function writeSessions(list) {
+  const arr = (list || []).filter(Boolean);
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(arr));
+  // Keep the v1 key pointing at the first wallet so a downgrade still works.
+  if (arr.length) localStorage.setItem(SESSION_KEY, JSON.stringify(arr[0]));
   else localStorage.removeItem(SESSION_KEY);
+}
+
+function readSession() {
+  return readSessions()[0] || null;
+}
+
+function writeSession(s) {
+  const list = readSessions();
+  if (!s) {
+    writeSessions([]);
+    return;
+  }
+  const id = walletId(s);
+  const i = list.findIndex((w) => walletId(w) === id);
+  if (i >= 0) list[i] = s;
+  else list.push(s);
+  writeSessions(list);
 }
 function keysKey(conn) {
   return `${KEYS_PREFIX}:${conn.profileAddress}:${CFG().appId}`;
@@ -107,20 +156,54 @@ function nanoToDisplay(value, decimals = 9, frac = 4) {
 //   Miner.new → can_start → read tap_sum → start(session) → tap ~70x with
 //   jitter → stop → wait for acceptance → read tap_sum → get_reward → free
 // The taps are what earn; the clock face tap is an optional extra.
+// Global state. Everything per-wallet lives in a `W` slice inside `wallets`;
+// `M` itself now holds only what is genuinely shared.
 const M = {
-  conn: null,
-  running: false, // user intent: keep looping
-  loopAlive: false, // a loop is currently executing
-  currentMiner: null, // the live Miner instance during a session (for add_tap)
-  sessions: 0,
-  tapsSent: 0,
-  confirmed: 0,
-  epochTaps: 0,
-  epochStart: null, // _epochBigStart; reset budget when it changes
-  errors: 0,
-  lastGameRaw: null, // previous popitgame[slot] in nano, for the reward delta
-  lastRewardEpoch5m: null, // epoch_5m_start of the last successful get_reward
+  wallets: new Map(), // walletId -> W
+  selected: null, // walletId the UI is showing / manual taps go to
 };
+
+/** A single wallet's slice of state. One of these per connected wallet. */
+function makeWallet(conn) {
+  return {
+    conn,
+    running: false, // user intent: keep looping
+    loopAlive: false, // a loop is currently executing
+    currentMiner: null, // the live Miner instance during a session (for add_tap)
+    sessions: 0,
+    tapsSent: 0,
+    confirmed: 0,
+    epochTaps: 0,
+    epochStart: null, // _epochBigStart; reset budget when it changes
+    errors: 0,
+    lastGameRaw: null, // previous popitgame[slot] in nano, for the reward delta
+    lastRewardEpoch: null, // epoch_5m_start of the last successful get_reward
+  };
+}
+
+/** Register (or fetch) the state slice for a connection. */
+function walletFor(conn) {
+  const id = walletId(conn);
+  if (!id) return null;
+  let W = M.wallets.get(id);
+  if (!W) {
+    W = makeWallet(conn);
+    M.wallets.set(id, W);
+    if (!M.selected) M.selected = id;
+  } else {
+    W.conn = conn;
+  }
+  return W;
+}
+
+/** The wallet the UI is pointed at — manual taps and single-wallet reads. */
+function selectedWallet() {
+  return (M.selected && M.wallets.get(M.selected)) || M.wallets.values().next().value || null;
+}
+
+function allWallets() {
+  return [...M.wallets.values()];
+}
 
 /** Shape a `get_miner_data()` result into the event payload the Dart side
  *  reads. Everything past the first four keys needs the extended
@@ -217,7 +300,7 @@ async function newMiner(k) {
       const transient = isQueueFull(e) || s.includes("Failed to fetch");
       if (!transient || r >= delays.length) throw e;
       log("newMiner retry", `${r + 1}/${delays.length}`, s.slice(0, 160));
-      emitSession("waiting", {
+      emitSession(W, "waiting", {
         reason: isQueueFull(e)
           ? "network message queue full — backing off"
           : "network unreachable — retrying",
@@ -227,21 +310,35 @@ async function newMiner(k) {
   }
 }
 
-function emitSession(phase, extra = {}) {
+function emitSession(W, phase, extra = {}) {
   emit("session", {
+    // Which wallet this is about. Dart keys per-wallet rows on it and ignores
+    // events for wallets it is not currently showing.
+    walletId: walletId(W?.conn),
+    walletName: W?.conn?.walletName || null,
     phase, // 'starting' | 'tapping' | 'submitting' | 'accepted' | 'idle' | 'waiting'
-    n: M.sessions,
-    tapsSent: M.tapsSent,
-    confirmed: M.confirmed,
-    epochTaps: M.epochTaps,
+    n: W?.sessions ?? 0,
+    tapsSent: W?.tapsSent ?? 0,
+    confirmed: W?.confirmed ?? 0,
+    epochTaps: W?.epochTaps ?? 0,
     epochBudget: CFG().maxTapsPerEpoch,
     ...extra,
   });
 }
 
-async function runSessionLoop() {
-  if (M.loopAlive) return;
-  M.loopAlive = true;
+// One loop per wallet. `W` is that wallet's slice of state — every field the
+// loop touches (conn, running, loopAlive, currentMiner, sessions, tapsSent,
+// confirmed, epochTaps, epochStart, errors, lastRewardEpoch) is per-wallet, so
+// N wallets mine independently without sharing anything but the SDK itself.
+//
+// The per-account external-message cap is per *miner account*, so each wallet
+// has its own budget and the session-root/proof resends do not contend. Event
+// polling is the shared resource: each Miner spawns its own poll thread, which
+// is why this branch ships the 10s-poll WASM rather than the 2.5s single-wallet
+// build.
+async function runSessionLoop(W) {
+  if (W.loopAlive) return;
+  W.loopAlive = true;
   emit("mining_started");
 
   const cfg = CFG();
@@ -261,18 +358,18 @@ async function runSessionLoop() {
       miner?.free?.();
     } catch {}
     miner = null;
-    M.currentMiner = null;
+    W.currentMiner = null;
   };
 
-  while (M.running) {
-    const k = M.conn ? readKeys(M.conn) : null;
+  while (W.running) {
+    const k = W.conn ? readKeys(W.conn) : null;
     if (!k?.areKeysPropagated || !k.minerAddress) {
       emit("miner_error", { where: "loop", error: "mining keys not ready" });
       break;
     }
 
-    if (M.epochTaps >= cfg.maxTapsPerEpoch) {
-      emitSession("waiting", { reason: "epoch tap budget reached" });
+    if (W.epochTaps >= cfg.maxTapsPerEpoch) {
+      emitSession(W, "waiting", { reason: "epoch tap budget reached" });
       await sleep(60000);
       continue;
     }
@@ -280,13 +377,13 @@ async function runSessionLoop() {
     try {
       if (!miner) {
         miner = await newMiner(k);
-        M.currentMiner = miner;
+        W.currentMiner = miner;
       }
 
       // Seeds exhausted (or a worker somehow still running): this instance is
       // spent, so build a fresh one on the next pass.
       if (!(await miner.can_start())) {
-        emitSession("waiting", { reason: "no seed available yet" });
+        emitSession(W, "waiting", { reason: "no seed available yet" });
         dropMiner();
         await sleep(30000);
         continue;
@@ -300,9 +397,9 @@ async function runSessionLoop() {
         tapBefore = safeNum(d?.tap_sum);
         epoch5m = d?.epoch_5m_start?.toString() ?? null;
         const es = d?.epoch_start?.toString() ?? null;
-        if (es && es !== M.epochStart) {
-          M.epochStart = es;
-          M.epochTaps = 0;
+        if (es && es !== W.epochStart) {
+          W.epochStart = es;
+          W.epochTaps = 0;
           emit("epoch_rolled", { epochStart: es });
         }
         emitMinerData(d);
@@ -356,32 +453,32 @@ async function runSessionLoop() {
         });
       });
 
-      M.sessions += 1;
-      M.tapsSent = 0;
-      emitSession("tapping");
+      W.sessions += 1;
+      W.tapsSent = 0;
+      emitSession(W, "tapping");
 
       // ── auto-tap ──────────────────────────────────────────────
       const sessStart = Date.now();
-      const budget = cfg.maxTapsPerEpoch - M.epochTaps;
+      const budget = cfg.maxTapsPerEpoch - W.epochTaps;
       const tapCount = Math.min(cfg.tapsPerSession, budget);
       const safeUntil = sessStart + cfg.sessionDurationMs - TAP_INT * 2 - SUBMIT_STAGGER;
 
-      for (let i = 0; i < tapCount && M.running && Date.now() < safeUntil; i++) {
+      for (let i = 0; i < tapCount && W.running && Date.now() < safeUntil; i++) {
         try {
           miner.add_tap(Math.round(rint(40, 360)), Math.round(rint(80, 640)));
-          M.tapsSent++;
+          W.tapsSent++;
         } catch (e) {
           if (String(e?.message || e).includes("No running workers")) {
             await sleep(1000);
             if (Date.now() < safeUntil) {
               try {
                 miner.add_tap(Math.round(rint(40, 360)), Math.round(rint(80, 640)));
-                M.tapsSent++;
+                W.tapsSent++;
               } catch {}
             }
           }
         }
-        if (i % 5 === 0) emitSession("tapping");
+        if (i % 5 === 0) emitSession(W, "tapping");
         const jitter = TAP_INT * JITTER * (Math.random() * 2 - 1);
         await sleep(Math.max(300, TAP_INT + jitter));
       }
@@ -400,7 +497,7 @@ async function runSessionLoop() {
       //  * `session_accepted` arrives via the SDK's 2.5 s GraphQL event poll —
       //    unreliable, so we never block on it. The reward accrues on-chain
       //    regardless; `tap_sum` climbing is the signal we use instead.
-      emitSession("submitting");
+      emitSession(W, "submitting");
       await sleep(Math.random() * SUBMIT_STAGGER);
       try {
         miner.stop();
@@ -408,7 +505,7 @@ async function runSessionLoop() {
 
       for (
         let w = 0;
-        w < 60 && M.running && !proofSubmitted && !sessionErr && !sessionEmpty;
+        w < 60 && W.running && !proofSubmitted && !sessionErr && !sessionEmpty;
         w++
       ) {
         await sleep(3000);
@@ -419,7 +516,7 @@ async function runSessionLoop() {
 
       // tap_sum after — poll until it reflects this session (cap ~48 s).
       let tapAfter = tapBefore;
-      for (let retry = 0; retry < 12 && M.running; retry++) {
+      for (let retry = 0; retry < 12 && W.running; retry++) {
         try {
           const d = await miner.get_miner_data();
           tapAfter = safeNum(d?.tap_sum);
@@ -433,18 +530,18 @@ async function runSessionLoop() {
         await sleep(4000);
       }
       const confirmed = Math.max(0, tapAfter - tapBefore);
-      M.confirmed = confirmed;
-      M.epochTaps += confirmed;
+      W.confirmed = confirmed;
+      W.epochTaps += confirmed;
 
       // `get_reward` is documented as pointless more than once per reward
       // epoch (~1000 blocks), and it is one more external message against the
       // per-account cap — so skip it if the 5-minute epoch hasn't rolled.
-      const rewardDue = !sessionErr && !sessionEmpty && (epoch5m == null || epoch5m !== M.lastRewardEpoch5m);
+      const rewardDue = !sessionErr && !sessionEmpty && (epoch5m == null || epoch5m !== W.lastRewardEpoch5m);
       if (rewardDue) {
         for (let r = 0; r < 3; r++) {
           try {
             await tx(() => miner.get_reward());
-            M.lastRewardEpoch5m = epoch5m;
+            W.lastRewardEpoch5m = epoch5m;
             break;
           } catch (e) {
             if (isQueueFull(e) && r < 2) {
@@ -458,37 +555,37 @@ async function runSessionLoop() {
       }
 
       emit("session_finished", {
-        sessions: M.sessions,
-        tapsSent: M.tapsSent,
+        sessions: W.sessions,
+        tapsSent: W.tapsSent,
         confirmed,
-        epochTaps: M.epochTaps,
+        epochTaps: W.epochTaps,
         empty: sessionEmpty,
         error: sessionErr,
       });
-      emitSession("idle", { empty: sessionEmpty, error: sessionErr });
+      emitSession(W, "idle", { empty: sessionEmpty, error: sessionErr });
 
       window.Bee?.refreshBalance?.().catch(() => {});
-      M.errors = 0;
+      W.errors = 0;
 
       // Keep the miner: the next session reuses its seed queue.
       if (sessionErr && isQueueFull({ message: sessionErr })) {
         // The node is shedding our messages; give its queue room to drain
         // before spending more of the per-account budget.
-        emitSession("waiting", { reason: "network message queue full — backing off" });
+        emitSession(W, "waiting", { reason: "network message queue full — backing off" });
         await sleep(60000);
       } else {
         await sleep(2000 + Math.random() * cfg.sessionBoundaryJitterMs);
       }
     } catch (e) {
-      M.errors++;
+      W.errors++;
       emit("miner_error", { where: "session", error: String(e?.message || e) });
       dropMiner();
-      await sleep(Math.min(15000 * 2 ** Math.min(M.errors - 1, 4), 120000));
+      await sleep(Math.min(15000 * 2 ** Math.min(W.errors - 1, 4), 120000));
     }
   }
 
   dropMiner();
-  M.loopAlive = false;
+  W.loopAlive = false;
   emit("mining_stopped");
 }
 
@@ -496,14 +593,23 @@ async function runSessionLoop() {
 window.Bee = {
   async init() {
     await ensureSdk();
-    M.conn = readSession();
-    emit("ready", { connected: !!M.conn, walletName: M.conn?.walletName || null });
-    if (M.conn) {
-      const k = readKeys(M.conn);
-      if (k?.areKeysPropagated) emit("keys_ready");
+    // Register every stored wallet (readSessions migrates a v1 install).
+    for (const conn of readSessions()) walletFor(conn);
+    const sel = selectedWallet();
+    emit("ready", {
+      connected: !!sel,
+      walletName: sel?.conn?.walletName || null,
+      wallets: allWallets().map((W) => ({
+        walletId: walletId(W.conn),
+        walletName: W.conn?.walletName || null,
+        keysReady: !!readKeys(W.conn)?.areKeysPropagated,
+      })),
+    });
+    if (sel) {
+      if (readKeys(sel.conn)?.areKeysPropagated) emit("keys_ready");
       this.refreshBalance().catch(() => {});
     }
-    return { connected: !!M.conn };
+    return { connected: !!sel, wallets: M.wallets.size };
   },
 
   /** Start a wallet-connect session. Returns the deep link for the QR code. */
@@ -528,7 +634,7 @@ window.Bee = {
           180,
           1000,
         );
-        M.conn = {
+        const conn = {
           walletName: hello.wallet_name,
           walletAddress: hello.wallet_address,
           profileAddress: hello.profile_address,
@@ -536,8 +642,12 @@ window.Bee = {
           description: session.description,
           sessionStateJson: hello.session_state_json,
         };
-        writeSession(M.conn);
-        emit("wallet_connected", { walletName: M.conn.walletName });
+        writeSession(conn); // appends, or updates in place if already known
+        walletFor(conn);
+        // A freshly connected wallet becomes selected, so the authorise step
+        // that follows acts on it.
+        M.selected = walletId(conn);
+        emit("wallet_connected", { walletId: walletId(conn), walletName: conn.walletName });
         this.refreshBalance().catch(() => {});
       } catch (e) {
         emit("connect_error", { error: String(e?.message || e) });
@@ -548,7 +658,28 @@ window.Bee = {
   },
 
   async requestMiningKeys() {
-    if (!M.conn) throw new Error("no wallet connected");
+    const conn = selectedWallet()?.conn;
+    if (!conn) throw new Error("no wallet connected");
+
+    // A connect session lives 24h. Past that, request_set_mining_keys fails deep
+    // in the SDK with "rekey_outbound: Connect session expired at <epoch>",
+    // which says nothing about which wallet or what to do. Check first and say
+    // it plainly — the wallet has to be reconnected, not re-authorised.
+    const expiresAt = (() => {
+      try {
+        return JSON.parse(conn.sessionStateJson || "{}").expires_at || 0;
+      } catch {
+        return 0;
+      }
+    })();
+    if (expiresAt && Date.now() / 1000 > expiresAt) {
+      throw new Error(
+        `The connect session for "${conn.walletName}" expired on ` +
+          `${new Date(expiresAt * 1000).toLocaleString()}. Disconnect this ` +
+          `wallet and connect it again to re-authorise it.`,
+      );
+    }
+
     await ensureSdk();
 
     const generated = await gen_mining_keys(CFG().appId);
@@ -560,19 +691,19 @@ window.Bee = {
     const beeConnect = new BeeConnect();
     const req = await beeConnect.request_set_mining_keys(
       CFG().endpoints,
-      M.conn.sessionId,
-      M.conn.description,
-      M.conn.sessionStateJson,
+      conn.sessionId,
+      conn.description,
+      conn.sessionStateJson,
       CFG().appId,
       prefixedPublic,
       30,
       1000,
     );
     if (req.updated_session_state_json) {
-      M.conn.sessionStateJson = req.updated_session_state_json;
-      writeSession(M.conn);
+      conn.sessionStateJson = req.updated_session_state_json;
+      writeSession(conn);
     }
-    writeKeys(M.conn, {
+    writeKeys(conn, {
       ownerPublic: generated.public,
       ownerSecret: generated.secret,
       minerAddress: null,
@@ -582,7 +713,7 @@ window.Bee = {
 
     (async () => {
       try {
-        const minerAddress = await getMinerAddress(M.conn.walletName);
+        const minerAddress = await getMinerAddress(conn.walletName);
         await ensure_mining_keys_propagated({
           client_config: { network: { endpoints: CFG().endpoints } },
           miner_address: minerAddress,
@@ -591,7 +722,7 @@ window.Bee = {
           max_attempts: 120,
           interval_ms: 2000,
         });
-        writeKeys(M.conn, {
+        writeKeys(conn, {
           ownerPublic: generated.public,
           ownerSecret: generated.secret,
           minerAddress,
@@ -604,61 +735,95 @@ window.Bee = {
     })();
   },
 
-  async startMining() {
-    if (M.running) return;
-    if (!M.conn) throw new Error("no wallet connected");
-    const k = readKeys(M.conn);
-    if (!k?.areKeysPropagated || !k.minerAddress) throw new Error("mining keys not ready");
-    M.running = true;
-    runSessionLoop();
+  /** Start mining. With no id, starts every wallet whose keys are ready.
+   *
+   *  Wallets are offset at *start*, not only at submit: without it N wallets
+   *  march in lockstep and hit the node together on every phase boundary, and
+   *  submit-time jitter cannot undo an alignment the sessions began with.
+   */
+  async startMining(targetId = null) {
+    const targets = targetId ? [M.wallets.get(targetId)].filter(Boolean) : allWallets();
+    if (!targets.length) throw new Error("no wallet connected");
+
+    const stagger = CFG().walletStartStaggerMs ?? 1500;
+    let started = 0;
+    for (const W of targets) {
+      if (W.running) continue;
+      const k = readKeys(W.conn);
+      if (!k?.areKeysPropagated || !k.minerAddress) {
+        // One unprepared wallet must not stop the others from mining.
+        emit("miner_error", {
+          where: "start",
+          walletId: walletId(W.conn),
+          walletName: W.conn?.walletName || null,
+          error: "mining keys not ready",
+        });
+        continue;
+      }
+      W.running = true;
+      if (started) await sleep(stagger + Math.random() * stagger);
+      runSessionLoop(W);
+      started += 1;
+    }
+    if (!started && targets.length === 1) throw new Error("mining keys not ready");
+    return { started };
   },
 
-  async stopMining() {
-    M.running = false;
-    try {
-      M.currentMiner?.stop();
-    } catch (e) {
-      log("stop error", String(e?.message || e));
+  async stopMining(targetId = null) {
+    const targets = targetId ? [M.wallets.get(targetId)].filter(Boolean) : allWallets();
+    for (const W of targets) {
+      W.running = false;
+      try {
+        W.currentMiner?.stop();
+      } catch (e) {
+        log("stop error", String(e?.message || e));
+      }
     }
   },
 
   /** Optional bonus tap from a real touch on the clock face. Only lands if a
    *  session is currently tapping. */
   async addTap(x, y) {
+    // With several wallets mining at once "the current miner" is ambiguous, so
+    // a real touch goes to the wallet the UI is showing — never to whichever
+    // session happens to be live.
+    const W = selectedWallet();
     try {
-      M.currentMiner?.add_tap(Math.max(0, Math.round(x)), Math.max(0, Math.round(y)));
-      M.tapsSent++;
-      emit("tap", { x, y });
+      W?.currentMiner?.add_tap(Math.max(0, Math.round(x)), Math.max(0, Math.round(y)));
+      if (W) W.tapsSent++;
+      emit("tap", { x, y, walletId: walletId(W?.conn) });
     } catch (e) {
       log("addTap error", String(e?.message || e));
     }
   },
 
-  async claimReward() {
-    const k = M.conn ? readKeys(M.conn) : null;
+  async claimReward(targetId = null) {
+    const W = targetId ? M.wallets.get(targetId) : selectedWallet();
+    const k = W?.conn ? readKeys(W.conn) : null;
     if (!k?.minerAddress) throw new Error("no miner");
-    const miner = M.currentMiner ?? (await newMiner(k));
+    const miner = W?.currentMiner ?? (await newMiner(k));
     try {
       await tx(() => miner.get_reward());
       emit("reward_claimed");
       window.Bee.refreshBalance().catch(() => {});
     } finally {
-      if (miner !== M.currentMiner) miner.free?.();
+      if (miner !== W?.currentMiner) miner.free?.();
     }
   },
 
-  async refreshBalance() {
-    if (!M.conn) return;
+  async refreshBalance(targetId = null) {
+    const W = targetId ? M.wallets.get(targetId) : selectedWallet();
+    if (!W?.conn) return;
     await ensureSdk();
     const wallet = new Wallet(CFG().endpoints, null, CFG().apiUrl, CFG().appId);
     try {
       const native = await wallet.get_multifactor_balances({
-        multifactor_address: M.conn.walletAddress,
+        multifactor_address: W.conn.walletAddress,
       });
       let tokens = {};
       try {
         const t = await wallet.get_tokens_balances({
-          multifactor_address: M.conn.walletAddress,
+          multifactor_address: W.conn.walletAddress,
         });
         tokens = t.tokens ?? {};
       } catch (e) {
@@ -674,13 +839,13 @@ window.Bee = {
       // landed; do it in BigInt so nano-precision survives.
       const gameRaw = popitgame[slot] != null ? String(popitgame[slot]) : null;
       let lastReward = null;
-      if (gameRaw != null && M.lastGameRaw != null) {
+      if (gameRaw != null && W.lastGameRaw != null) {
         try {
-          const delta = BigInt(gameRaw) - BigInt(M.lastGameRaw);
+          const delta = BigInt(gameRaw) - BigInt(W.lastGameRaw);
           if (delta > 0n) lastReward = nanoToDisplay(delta.toString(), 9, 4);
         } catch {}
       }
-      if (gameRaw != null) M.lastGameRaw = gameRaw;
+      if (gameRaw != null) W.lastGameRaw = gameRaw;
 
       emit("balance", {
         liquid: nanoToDisplay(ecc[slot] ?? "0", 9, 4),
@@ -698,8 +863,8 @@ window.Bee = {
     }
   },
 
-  async minerData() {
-    const src = M.currentMiner;
+  async minerData(targetId = null) {
+    const src = (targetId ? M.wallets.get(targetId) : selectedWallet())?.currentMiner;
     if (!src) return;
     try {
       const d = await src.get_miner_data();
@@ -713,21 +878,22 @@ window.Bee = {
   async disconnect() {
     // Stop the miner before tearing down the session so no session keeps
     // submitting against keys we're about to revoke.
-    M.running = false;
+    const W = selectedWallet();
+    if (W) W.running = false;
     try {
-      M.currentMiner?.stop();
+      W?.currentMiner?.stop();
     } catch (e) {
       log("disconnect stop err", String(e?.message || e));
     }
 
     try {
-      if (M.conn) {
+      if (W?.conn) {
         const beeConnect = new BeeConnect();
         await beeConnect.disconnect_session(
           CFG().endpoints,
-          M.conn.sessionId,
-          M.conn.description,
-          M.conn.sessionStateJson,
+          W.conn.sessionId,
+          W.conn.description,
+          W.conn.sessionStateJson,
           "user_requested",
           30,
           1000,
@@ -736,19 +902,19 @@ window.Bee = {
     } catch (e) {
       log("disconnect error", String(e?.message || e));
     }
-    M.running = false;
     try {
-      M.currentMiner?.free?.();
+      W?.currentMiner?.free?.();
     } catch {}
-    M.currentMiner = null;
-    M.sessions = 0;
-    M.epochTaps = 0;
-    M.lastGameRaw = null;
-    M.lastRewardEpoch5m = null;
-    writeKeys(M.conn, null);
-    writeSession(null);
-    M.conn = null;
-    emit("disconnected");
+
+    // Drop only this wallet — the others keep mining.
+    const gone = walletId(W?.conn);
+    if (W?.conn) writeKeys(W.conn, null);
+    if (gone) {
+      M.wallets.delete(gone);
+      writeSessions(readSessions().filter((c) => walletId(c) !== gone));
+      if (M.selected === gone) M.selected = allWallets().length ? walletId(allWallets()[0].conn) : null;
+    }
+    emit("disconnected", { walletId: gone, remaining: M.wallets.size });
   },
 };
 

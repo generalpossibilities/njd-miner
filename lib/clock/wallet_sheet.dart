@@ -47,13 +47,13 @@ class _WalletSheetState extends State<WalletSheet> {
       widget.miner.state.phase.index >= MinerPhase.needsMiningKeys.index &&
       widget.miner.state.phase != MinerPhase.crashed;
 
-  Future<void> _connect() async {
+  Future<void> _connect({bool addAnother = false}) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final req = await widget.miner.connectWallet();
+      final req = await widget.miner.connectWallet(addAnother: addAnother);
       if (req == null) {
         await _authorise();
         return;
@@ -89,9 +89,15 @@ class _WalletSheetState extends State<WalletSheet> {
           (c) => AlertDialog(
             backgroundColor: const Color(0xFF1B1C1F),
             title: const Text('Disconnect wallet?'),
-            content: const Text(
-              'Mining stops and the mining keys are removed from this device. '
-              'You can reconnect the same wallet later.',
+            content: Text(
+              widget.miner.wallets.length > 1
+                  // Only the selected wallet is dropped — saying "mining stops"
+                  // would be wrong while the others keep going.
+                  ? 'This wallet stops mining and its mining keys are removed '
+                      'from this device. Your other wallets keep mining. You '
+                      'can reconnect it later.'
+                  : 'Mining stops and the mining keys are removed from this '
+                      'device. You can reconnect the same wallet later.',
             ),
             actions: [
               TextButton(
@@ -172,10 +178,93 @@ class _WalletSheetState extends State<WalletSheet> {
     );
   }
 
+  /// The connected wallets, with the one the panel is describing marked.
+  ///
+  /// Several wallets mine at once, so the figures below belong to whichever is
+  /// selected here — without this the numbers would look like they belonged to
+  /// all of them.
+  Widget _walletList() {
+    final wallets = widget.miner.wallets;
+    final selected = widget.miner.selectedWalletId;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              wallets.length > 1 ? '${wallets.length} wallets' : 'Wallet',
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _busy ? null : () => _connect(addAnother: true),
+              icon: const Icon(Icons.add, size: 14),
+              label: const Text('Add wallet', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFFFC531),
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 28),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ],
+        ),
+        for (final w in wallets)
+          InkWell(
+            onTap:
+                _busy || w['walletId'] == selected
+                    ? null
+                    : () async {
+                      await widget.miner.selectWallet('${w['walletId']}');
+                      if (mounted) setState(() {});
+                    },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    w['walletId'] == selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    size: 16,
+                    color:
+                        w['walletId'] == selected
+                            ? const Color(0xFFFFC531)
+                            : Colors.white24,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${w['walletName'] ?? 'wallet'}',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color:
+                            w['walletId'] == selected
+                                ? Colors.white
+                                : Colors.white54,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  if (w['keysReady'] != true)
+                    const Text(
+                      'keys pending',
+                      style: TextStyle(color: Colors.orangeAccent, fontSize: 10),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        const Divider(color: Colors.white12, height: 20),
+      ],
+    );
+  }
+
   Widget _connectedBody(MinerState state) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _walletList(),
         _balanceRow('Mining rewards (locked)', state.gameBalance, strong: true),
         _balanceRow(
           'Last reward',
@@ -224,7 +313,13 @@ class _WalletSheetState extends State<WalletSheet> {
             TextButton(
               onPressed: _busy ? null : _disconnect,
               style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-              child: const Text('Disconnect'),
+              // Name the target: with several wallets connected, an
+              // unqualified "Disconnect" reads as dropping all of them.
+              child: Text(
+                widget.miner.wallets.length > 1
+                    ? 'Disconnect this'
+                    : 'Disconnect',
+              ),
             ),
           ],
         ),

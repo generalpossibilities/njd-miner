@@ -47,6 +47,43 @@ class WebViewBeeMiner implements BeeMiner {
   final _stateController = StreamController<MinerState>.broadcast();
   MinerState _state = MinerState.initial;
 
+  /// Wallets the runner knows about: {walletId, walletName, keysReady}.
+  List<Map<String, dynamic>> _wallets = const [];
+  @override
+  List<Map<String, dynamic>> get wallets => _wallets;
+
+  /// The wallet this single MinerState describes. Several wallets can mine at
+  /// once and each emits its own session events, so events carrying a different
+  /// walletId are ignored here rather than interleaved into one state — that
+  /// would make counters jump between wallets.
+  String? _selectedWalletId;
+  @override
+  String? get selectedWalletId => _selectedWalletId;
+
+  @override
+  Future<void> selectWallet(String walletId) async {
+    if (_selectedWalletId == walletId) return;
+    _selectedWalletId = walletId;
+    // The other wallets keep mining; only what the UI follows changes. Reset the
+    // per-session figures so the new wallet's first event does not land on top
+    // of the previous wallet's counters.
+    _set(
+      _state.copyWith(
+        sessionPhase: null,
+        sessionNote: null,
+        tapsSent: 0,
+        confirmed: 0,
+      ),
+    );
+    await refreshBalance();
+  }
+
+  bool _isOtherWallet(Map<dynamic, dynamic> raw) {
+    final id = raw['walletId']?.toString();
+    if (id == null || _selectedWalletId == null) return false;
+    return id != _selectedWalletId;
+  }
+
   Completer<void>? _connectCompleter;
   Timer? _balanceTimer;
   Timer? _minerDataTimer;
@@ -171,6 +208,7 @@ class WebViewBeeMiner implements BeeMiner {
       'tapIntervalMs': BeeConfig.tapIntervalMs,
       'tapJitterPct': BeeConfig.tapJitterPct,
       'submitStaggerMs': BeeConfig.submitStaggerMs,
+      'walletStartStaggerMs': BeeConfig.walletStartStaggerMs,
       'sessionBoundaryJitterMs': BeeConfig.sessionBoundaryJitterMs,
       'maxTapsPerEpoch': BeeConfig.maxTapsPerEpoch,
       'connectSessionTtlSec': BeeConfig.connectSessionTtlSec,
@@ -179,8 +217,14 @@ class WebViewBeeMiner implements BeeMiner {
   }
 
   @override
-  Future<WalletConnectRequest?> connectWallet() async {
-    if (_state.phase.index > MinerPhase.needsWallet.index &&
+  Future<WalletConnectRequest?> connectWallet({bool addAnother = false}) async {
+    // The short-circuit means "you already have a wallet, nothing to do" — right
+    // for the initial setup, wrong for adding a second one. Without the flag,
+    // "Add wallet" returned null and the caller fell through to authorising the
+    // *existing* wallet, whose connect session is typically long expired:
+    //   request_set_mining_keys rekey_outbound: Connect session expired
+    if (!addAnother &&
+        _state.phase.index > MinerPhase.needsWallet.index &&
         _state.phase != MinerPhase.crashed) {
       return null; // already connected
     }
@@ -270,6 +314,12 @@ class WebViewBeeMiner implements BeeMiner {
         break;
       case 'ready':
         final connected = raw['connected'] == true;
+        _wallets = ((raw['wallets'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((w) => w.map((k, v) => MapEntry(k.toString(), v)))
+            .toList();
+        _selectedWalletId ??=
+            _wallets.isNotEmpty ? _wallets.first['walletId']?.toString() : null;
         _set(
           _state.copyWith(
             phase:
@@ -278,6 +328,9 @@ class WebViewBeeMiner implements BeeMiner {
         );
         break;
       case 'wallet_connected':
+        // A newly connected wallet becomes the one the UI follows, matching the
+        // runner, which selects it so the authorise step acts on it.
+        _selectedWalletId = raw['walletId']?.toString() ?? _selectedWalletId;
         _connectCompleter?.complete();
         _connectCompleter = null;
         _set(
@@ -321,6 +374,7 @@ class WebViewBeeMiner implements BeeMiner {
         _set(_state.copyWith(phase: MinerPhase.idle, sessionPhase: 'idle'));
         break;
       case 'session':
+        if (_isOtherWallet(raw)) break;
         int i(String k) => (raw[k] as num?)?.toInt() ?? 0;
         _set(
           _state.copyWith(
@@ -342,6 +396,7 @@ class WebViewBeeMiner implements BeeMiner {
         // computation/submit milestones — informational only for now
         break;
       case 'session_finished':
+        if (_isOtherWallet(raw)) break;
         _set(
           _state.copyWith(
             sessionsCompleted:
@@ -386,6 +441,7 @@ class WebViewBeeMiner implements BeeMiner {
         _set(_state.copyWith(message: 'Reward claimed'));
         break;
       case 'miner_error':
+        if (_isOtherWallet(raw)) break;
         final detail = raw['error']?.toString() ?? '';
         // A full node message queue is the network shedding load, not a crash.
         // Acki Nacki v0.19.1 caps queued external messages per account, and the
