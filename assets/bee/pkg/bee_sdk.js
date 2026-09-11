@@ -1153,8 +1153,7 @@ export class MinerAccountData {
         return BigInt.asUintN(64, ret);
     }
     /**
-     * `_miningDurSum` — total mining duration the wallet has accumulated in the
-     * current big (24-hour) epoch, in the contract's time units.
+     * `_miningDurSum` — total mining duration accrued this 24-hour epoch.
      * @returns {bigint}
      */
     get mining_dur_sum() {
@@ -1170,7 +1169,7 @@ export class MinerAccountData {
         return (BigInt.asUintN(64, ret[0]) | (BigInt.asUintN(64, ret[1]) << BigInt(64)));
     }
     /**
-     * `_oldTapsSize` — session count from the immediately previous short epoch.
+     * `_oldTapsSize` — session count from the previous ~5-minute epoch.
      * @returns {bigint}
      */
     get old_taps_size() {
@@ -1192,8 +1191,8 @@ export class MinerAccountData {
         return (BigInt.asUintN(64, ret[0]) | (BigInt.asUintN(64, ret[1]) << BigInt(64)));
     }
     /**
-     * `_tapsSize` — number of mining sessions the wallet has recorded in the
-     * current short (~5-minute) reward epoch. Resets when `epoch_5m_start` rolls.
+     * `_tapsSize` — mining sessions recorded in the current ~5-minute reward
+     * epoch. Resets when `epoch_5m_start` rolls.
      * @returns {bigint}
      */
     get taps_size() {
@@ -1219,8 +1218,7 @@ export class MinerAccountData {
         wasm.__wbg_set_mineraccountdata_epoch_start(this.__wbg_ptr, arg0);
     }
     /**
-     * `_miningDurSum` — total mining duration the wallet has accumulated in the
-     * current big (24-hour) epoch, in the contract's time units.
+     * `_miningDurSum` — total mining duration accrued this 24-hour epoch.
      * @param {bigint} arg0
      */
     set mining_dur_sum(arg0) {
@@ -1234,7 +1232,7 @@ export class MinerAccountData {
         wasm.__wbg_set_mineraccountdata_modified_tap_sum(this.__wbg_ptr, arg0, arg0 >> BigInt(64));
     }
     /**
-     * `_oldTapsSize` — session count from the immediately previous short epoch.
+     * `_oldTapsSize` — session count from the previous ~5-minute epoch.
      * @param {bigint} arg0
      */
     set old_taps_size(arg0) {
@@ -1253,8 +1251,8 @@ export class MinerAccountData {
         wasm.__wbg_set_mineraccountdata_tap_sum(this.__wbg_ptr, arg0, arg0 >> BigInt(64));
     }
     /**
-     * `_tapsSize` — number of mining sessions the wallet has recorded in the
-     * current short (~5-minute) reward epoch. Resets when `epoch_5m_start` rolls.
+     * `_tapsSize` — mining sessions recorded in the current ~5-minute reward
+     * epoch. Resets when `epoch_5m_start` rolls.
      * @param {bigint} arg0
      */
     set taps_size(arg0) {
@@ -5651,42 +5649,42 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 3416, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 4346, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e);
             return ret;
         },
         __wbindgen_generic_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 2495, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 2528, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
             const ret = makeClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__he543d5900fbe76e3);
             return ret;
         },
         __wbindgen_generic_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 3416, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("Event")], shim_idx: 4346, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_327);
             return ret;
         },
         __wbindgen_generic_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("IDBVersionChangeEvent")], shim_idx: 3417, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("IDBVersionChangeEvent")], shim_idx: 4347, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h925b4af5ea1f93bb);
             return ret;
         },
         __wbindgen_generic_0000000000000006: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 3416, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 4346, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h217ac0f026a0e79e_329);
             return ret;
         },
         __wbindgen_generic_0000000000000007: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 2494, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 2527, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
             const ret = makeClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h16e37a3982040429);
             return ret;
         },
         __wbindgen_generic_0000000000000008: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 3418, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 4348, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__hb110da9538c22f83);
             return ret;
         },
         __wbindgen_generic_0000000000000009: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 4819, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [], shim_idx: 4821, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h876d8efedbc4c57a);
             return ret;
         },

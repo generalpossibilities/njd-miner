@@ -597,8 +597,7 @@ export class MinerAccountData {
     epoch_5m_start: bigint;
     epoch_start: bigint;
     /**
-     * `_miningDurSum` — total mining duration the wallet has accumulated in the
-     * current big (24-hour) epoch, in the contract's time units.
+     * `_miningDurSum` — total mining duration accrued this 24-hour epoch.
      */
     mining_dur_sum: bigint;
     /**
@@ -606,14 +605,14 @@ export class MinerAccountData {
      */
     modified_tap_sum: bigint;
     /**
-     * `_oldTapsSize` — session count from the immediately previous short epoch.
+     * `_oldTapsSize` — session count from the previous ~5-minute epoch.
      */
     old_taps_size: bigint;
     tap_sum_5m: bigint;
     tap_sum: bigint;
     /**
-     * `_tapsSize` — number of mining sessions the wallet has recorded in the
-     * current short (~5-minute) reward epoch. Resets when `epoch_5m_start` rolls.
+     * `_tapsSize` — mining sessions recorded in the current ~5-minute reward
+     * epoch. Resets when `epoch_5m_start` rolls.
      */
     taps_size: bigint;
 }

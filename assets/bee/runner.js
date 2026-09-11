@@ -330,7 +330,14 @@ async function runSessionLoop() {
             return;
           }
           if (e.error) {
-            sessionErr = `${e.action}: ${e.error}`;
+            // e.error is the worker's own label; the node's actual error text is
+            // in e.data.message. Upstream also labelled proof failures "Submit
+            // session root failed", so the label alone points at the wrong call.
+            sessionErr = `${e.action}: ${e.error}${e.data?.message ? ` — ${e.data.message}` : ""}`;
+          } else if (e.action === "submit_session_root_retry" || e.action === "submit_session_proof_retry") {
+            // Not a failure: the node's queue is full and the worker is resending
+            // the same session. Only a give-up arrives as e.error.
+            log(`${e.action === "submit_session_root_retry" ? "session root" : "session proof"} queue-full — resending (attempt ${e.data?.attempt})`);
           } else if (e.action === "computation_completed" && e.data?.empty) {
             sessionEmpty = true;
           } else if (e.action === "submit_session_proof") {
@@ -338,7 +345,7 @@ async function runSessionLoop() {
           } else if (e.action === "session_accepted") {
             sessionAccepted = true;
           }
-          if (["session_accepted", "submit_session_root", "submit_session_proof", "computation_completed"].includes(e.action)) {
+          if (["session_accepted", "submit_session_root", "submit_session_root_retry", "submit_session_proof", "submit_session_proof_retry", "computation_completed"].includes(e.action)) {
             emit("session_event", { action: e.action, error: e.error ?? null });
           }
           if (!workerReady) {
