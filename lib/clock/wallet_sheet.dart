@@ -172,10 +172,93 @@ class _WalletSheetState extends State<WalletSheet> {
     );
   }
 
+  /// The connected wallets, with the one the panel is describing marked.
+  ///
+  /// Several wallets mine at once, so the figures below belong to whichever is
+  /// selected here — without this the numbers would look like they belonged to
+  /// all of them.
+  Widget _walletList() {
+    final wallets = widget.miner.wallets;
+    final selected = widget.miner.selectedWalletId;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              wallets.length > 1 ? '${wallets.length} wallets' : 'Wallet',
+              style: const TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _busy ? null : _connect,
+              icon: const Icon(Icons.add, size: 14),
+              label: const Text('Add wallet', style: TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFFFFC531),
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 28),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ],
+        ),
+        for (final w in wallets)
+          InkWell(
+            onTap:
+                _busy || w['walletId'] == selected
+                    ? null
+                    : () async {
+                      await widget.miner.selectWallet('${w['walletId']}');
+                      if (mounted) setState(() {});
+                    },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    w['walletId'] == selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    size: 16,
+                    color:
+                        w['walletId'] == selected
+                            ? const Color(0xFFFFC531)
+                            : Colors.white24,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${w['walletName'] ?? 'wallet'}',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color:
+                            w['walletId'] == selected
+                                ? Colors.white
+                                : Colors.white54,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  if (w['keysReady'] != true)
+                    const Text(
+                      'keys pending',
+                      style: TextStyle(color: Colors.orangeAccent, fontSize: 10),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        const Divider(color: Colors.white12, height: 20),
+      ],
+    );
+  }
+
   Widget _connectedBody(MinerState state) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _walletList(),
         _balanceRow('Mining rewards (locked)', state.gameBalance, strong: true),
         _balanceRow(
           'Last reward',

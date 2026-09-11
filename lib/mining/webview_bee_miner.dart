@@ -49,6 +49,7 @@ class WebViewBeeMiner implements BeeMiner {
 
   /// Wallets the runner knows about: {walletId, walletName, keysReady}.
   List<Map<String, dynamic>> _wallets = const [];
+  @override
   List<Map<String, dynamic>> get wallets => _wallets;
 
   /// The wallet this single MinerState describes. Several wallets can mine at
@@ -56,7 +57,26 @@ class WebViewBeeMiner implements BeeMiner {
   /// walletId are ignored here rather than interleaved into one state — that
   /// would make counters jump between wallets.
   String? _selectedWalletId;
+  @override
   String? get selectedWalletId => _selectedWalletId;
+
+  @override
+  Future<void> selectWallet(String walletId) async {
+    if (_selectedWalletId == walletId) return;
+    _selectedWalletId = walletId;
+    // The other wallets keep mining; only what the UI follows changes. Reset the
+    // per-session figures so the new wallet's first event does not land on top
+    // of the previous wallet's counters.
+    _set(
+      _state.copyWith(
+        sessionPhase: null,
+        sessionNote: null,
+        tapsSent: 0,
+        confirmed: 0,
+      ),
+    );
+    await refreshBalance();
+  }
 
   bool _isOtherWallet(Map<dynamic, dynamic> raw) {
     final id = raw['walletId']?.toString();
