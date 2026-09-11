@@ -89,9 +89,15 @@ class _WalletSheetState extends State<WalletSheet> {
           (c) => AlertDialog(
             backgroundColor: const Color(0xFF1B1C1F),
             title: const Text('Disconnect wallet?'),
-            content: const Text(
-              'Mining stops and the mining keys are removed from this device. '
-              'You can reconnect the same wallet later.',
+            content: Text(
+              widget.miner.wallets.length > 1
+                  // Only the selected wallet is dropped — saying "mining stops"
+                  // would be wrong while the others keep going.
+                  ? 'This wallet stops mining and its mining keys are removed '
+                      'from this device. Your other wallets keep mining. You '
+                      'can reconnect it later.'
+                  : 'Mining stops and the mining keys are removed from this '
+                      'device. You can reconnect the same wallet later.',
             ),
             actions: [
               TextButton(
@@ -307,7 +313,13 @@ class _WalletSheetState extends State<WalletSheet> {
             TextButton(
               onPressed: _busy ? null : _disconnect,
               style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-              child: const Text('Disconnect'),
+              // Name the target: with several wallets connected, an
+              // unqualified "Disconnect" reads as dropping all of them.
+              child: Text(
+                widget.miner.wallets.length > 1
+                    ? 'Disconnect this'
+                    : 'Disconnect',
+              ),
             ),
           ],
         ),
