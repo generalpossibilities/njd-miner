@@ -217,8 +217,14 @@ class WebViewBeeMiner implements BeeMiner {
   }
 
   @override
-  Future<WalletConnectRequest?> connectWallet() async {
-    if (_state.phase.index > MinerPhase.needsWallet.index &&
+  Future<WalletConnectRequest?> connectWallet({bool addAnother = false}) async {
+    // The short-circuit means "you already have a wallet, nothing to do" — right
+    // for the initial setup, wrong for adding a second one. Without the flag,
+    // "Add wallet" returned null and the caller fell through to authorising the
+    // *existing* wallet, whose connect session is typically long expired:
+    //   request_set_mining_keys rekey_outbound: Connect session expired
+    if (!addAnother &&
+        _state.phase.index > MinerPhase.needsWallet.index &&
         _state.phase != MinerPhase.crashed) {
       return null; // already connected
     }

@@ -47,13 +47,13 @@ class _WalletSheetState extends State<WalletSheet> {
       widget.miner.state.phase.index >= MinerPhase.needsMiningKeys.index &&
       widget.miner.state.phase != MinerPhase.crashed;
 
-  Future<void> _connect() async {
+  Future<void> _connect({bool addAnother = false}) async {
     setState(() {
       _busy = true;
       _error = null;
     });
     try {
-      final req = await widget.miner.connectWallet();
+      final req = await widget.miner.connectWallet(addAnother: addAnother);
       if (req == null) {
         await _authorise();
         return;
@@ -197,7 +197,7 @@ class _WalletSheetState extends State<WalletSheet> {
             ),
             const Spacer(),
             TextButton.icon(
-              onPressed: _busy ? null : _connect,
+              onPressed: _busy ? null : () => _connect(addAnother: true),
               icon: const Icon(Icons.add, size: 14),
               label: const Text('Add wallet', style: TextStyle(fontSize: 12)),
               style: TextButton.styleFrom(

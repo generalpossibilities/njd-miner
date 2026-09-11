@@ -210,7 +210,13 @@ abstract class BeeMiner {
 
   /// Begin (or resume) the wallet-connect handshake. Returns null if a wallet is
   /// already connected.
-  Future<WalletConnectRequest?> connectWallet();
+  /// Begin connecting a wallet. Returns null when there is nothing to do
+  /// because a wallet is already set up.
+  ///
+  /// Pass [addAnother] to connect an *additional* wallet: that skips the
+  /// already-connected short-circuit, which otherwise makes "Add wallet" a
+  /// no-op that falls through to authorising the wallet you already had.
+  Future<WalletConnectRequest?> connectWallet({bool addAnother = false});
 
   /// Generate mining keys and ask the connected wallet to write them to the
   /// Miner contract, then wait for on-chain propagation.
