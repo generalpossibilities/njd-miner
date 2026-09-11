@@ -549,6 +549,26 @@ window.Bee = {
 
   async requestMiningKeys() {
     if (!M.conn) throw new Error("no wallet connected");
+
+    // A connect session lives 24h. Past that, request_set_mining_keys fails deep
+    // in the SDK with "rekey_outbound: Connect session expired at <epoch>",
+    // which says neither which wallet nor what to do about it. Check first and
+    // say it plainly — the wallet has to be reconnected, not re-authorised.
+    const expiresAt = (() => {
+      try {
+        return JSON.parse(M.conn.sessionStateJson || "{}").expires_at || 0;
+      } catch {
+        return 0;
+      }
+    })();
+    if (expiresAt && Date.now() / 1000 > expiresAt) {
+      throw new Error(
+        `The connect session for "${M.conn.walletName}" expired on ` +
+          `${new Date(expiresAt * 1000).toLocaleString()}. Disconnect this ` +
+          `wallet and connect it again to re-authorise it.`,
+      );
+    }
+
     await ensureSdk();
 
     const generated = await gen_mining_keys(CFG().appId);
