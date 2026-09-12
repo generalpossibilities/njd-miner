@@ -223,10 +223,14 @@ abstract class BeeMiner {
   Future<void> requestMiningKeys();
 
   /// Start the continuous mining loop (short sessions, auto re-armed).
-  Future<void> startMining();
+  /// Start mining. With no [walletId], starts every wallet whose keys are
+  /// ready; with one, starts just that wallet and leaves the rest as they are.
+  Future<void> startMining({String? walletId});
 
   /// Stop after the current session.
-  Future<void> stopMining();
+  /// Stop mining. With no [walletId], stops every wallet; with one, stops just
+  /// that wallet and the others keep going.
+  Future<void> stopMining({String? walletId});
 
   /// Register a real user touch on the clock face with the miner
   /// (`add_tap`, signed with the mining key). Coordinates are logical pixels.
@@ -257,6 +261,9 @@ abstract class BeeMiner {
 
   /// Recent runner log lines, newest last.
   List<String> get logLines => const [];
+
+  /// Drop everything currently in [logLines].
+  void clearLog() {}
 
   /// Disconnect the selected wallet. The others keep mining.
   Future<void> disconnect();

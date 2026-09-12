@@ -33,8 +33,19 @@ function log(...args) {
     .join(" ");
   if (logEl) logEl.textContent = `${line}\n${logEl.textContent}`.slice(0, 4000);
   console.log("[bee]", ...args);
-  // Forward to Dart. The WebView is offstage, so without this the log only
-  // exists in a DOM node nobody can see and in adb logcat.
+}
+
+/// Log a line that also reaches the app's log panel.
+///
+/// Only external-message traffic goes here — the messages this account actually
+/// spends against the per-account cap (session root, session proof, get_reward,
+/// cancel_session) and their retries. Everything else stays in the console:
+/// forwarding all of it buried the few lines worth reading.
+function logMsg(...args) {
+  const line = args
+    .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+    .join(" ");
+  log(...args);
   try {
     emit("log", { line, at: Date.now() });
   } catch {
@@ -308,7 +319,11 @@ async function newMiner(k) {
       const s = String(e?.message || e);
       const transient = isQueueFull(e) || s.includes("Failed to fetch");
       if (!transient || r >= delays.length) throw e;
-      log("newMiner retry", `${r + 1}/${delays.length}`, s.slice(0, 160));
+      logMsg(
+        isQueueFull(e)
+          ? `Miner.new queue-full (cancel_session) — retry ${r + 1}/${delays.length}`
+          : `Miner.new retry ${r + 1}/${delays.length}: ${s.slice(0, 120)}`,
+      );
       emitSession(W, "waiting", {
         reason: isQueueFull(e)
           ? "network message queue full — backing off"
@@ -443,13 +458,19 @@ async function runSessionLoop(W) {
           } else if (e.action === "submit_session_root_retry" || e.action === "submit_session_proof_retry") {
             // Not a failure: the node's queue is full and the worker is resending
             // the same session. Only a give-up arrives as e.error.
-            log(`${e.action === "submit_session_root_retry" ? "session root" : "session proof"} queue-full — resending (attempt ${e.data?.attempt})`);
+            logMsg(`${e.action === "submit_session_root_retry" ? "session root" : "session proof"} queue-full — resending (attempt ${e.data?.attempt})`);
           } else if (e.action === "computation_completed" && e.data?.empty) {
             sessionEmpty = true;
           } else if (e.action === "submit_session_proof") {
             proofSubmitted = true;
           } else if (e.action === "session_accepted") {
             sessionAccepted = true;
+          }
+          if (["submit_session_root", "submit_session_proof", "session_accepted"].includes(e.action)) {
+            logMsg(e.action);
+          }
+          if (e.error) {
+            logMsg(`${e.action} failed: ${e.error}${e.data?.message ? ` — ${e.data.message}` : ""}`);
           }
           if (["session_accepted", "submit_session_root", "submit_session_root_retry", "submit_session_proof", "submit_session_proof_retry", "computation_completed"].includes(e.action)) {
             emit("session_event", { action: e.action, error: e.error ?? null });
@@ -551,12 +572,14 @@ async function runSessionLoop(W) {
           try {
             await tx(() => miner.get_reward());
             W.lastRewardEpoch5m = epoch5m;
+            logMsg("get_reward sent");
             break;
           } catch (e) {
             if (isQueueFull(e) && r < 2) {
+              logMsg(`get_reward queue-full — retry ${r + 1}/3`);
               await sleep((r + 1) * 20000);
             } else {
-              log("get_reward", String(e?.message || e));
+              logMsg("get_reward failed:", String(e?.message || e));
               break;
             }
           }

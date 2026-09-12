@@ -273,6 +273,38 @@ class _WalletSheetState extends State<WalletSheet> {
               const _Chip(text: 'mining', color: Color(0xFF6BE28B))
             else
               const _Chip(text: 'idle', color: Colors.white38),
+            // Each wallet starts and stops on its own — stopping one must not
+            // take the others down with it.
+            if (keysReady)
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                tooltip: mining ? 'Stop this wallet' : 'Start this wallet',
+                icon: Icon(
+                  mining ? Icons.stop_circle_outlined : Icons.play_circle_outline,
+                  size: 20,
+                  color: mining ? Colors.redAccent : const Color(0xFF6BE28B),
+                ),
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        setState(() => _busy = true);
+                        try {
+                          final id = '${w['walletId']}';
+                          if (mining) {
+                            await widget.miner.stopMining(walletId: id);
+                          } else {
+                            await widget.miner.startMining(walletId: id);
+                          }
+                          await widget.miner.refreshWallets();
+                        } catch (e) {
+                          if (mounted) setState(() => _error = '$e');
+                        } finally {
+                          if (mounted) setState(() => _busy = false);
+                        }
+                      },
+              ),
           ],
         ),
       ),
@@ -305,21 +337,6 @@ class _WalletSheetState extends State<WalletSheet> {
         ),
         _balanceRow('Mining-duration sum', state.miningDurSum),
         const SizedBox(height: 8),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          value: widget.overlay.active,
-          onChanged: (_) => widget.overlay.toggle(),
-          title: const Text(
-            'Floating clock',
-            style: TextStyle(color: Colors.white, fontSize: 14),
-          ),
-          subtitle: const Text(
-            'A draggable clock over other apps that keeps mining. Needs '
-            '"display over other apps" permission.',
-            style: TextStyle(color: Colors.white38, fontSize: 11),
-          ),
-        ),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -347,16 +364,29 @@ class _WalletSheetState extends State<WalletSheet> {
             const Spacer(),
             IconButton(
               visualDensity: VisualDensity.compact,
+              tooltip: 'Copy log',
               icon: const Icon(Icons.copy, size: 14, color: Colors.white38),
               onPressed: () => Clipboard.setData(
                 ClipboardData(text: widget.miner.logLines.join('\n')),
               ),
             ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Clear log',
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 16,
+                color: Colors.white38,
+              ),
+              onPressed: () => setState(() => widget.miner.clearLog()),
+            ),
           ],
         ),
         Container(
           width: double.infinity,
-          height: 180,
+          // Taller now the floating-clock switch has gone from above it — the
+          // log is what this space is actually useful for.
+          height: 300,
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: Colors.white10,

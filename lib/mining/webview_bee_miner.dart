@@ -55,6 +55,12 @@ class WebViewBeeMiner implements BeeMiner {
   @override
   List<String> get logLines => List.unmodifiable(_logLines);
 
+  @override
+  void clearLog() {
+    _logLines.clear();
+    _set(_state);
+  }
+
   List<Map<String, dynamic>> _wallets = const [];
   @override
   List<Map<String, dynamic>> get wallets => _wallets;
@@ -290,14 +296,16 @@ class WebViewBeeMiner implements BeeMiner {
       _call<void>('await window.Bee.requestMiningKeys();');
 
   @override
-  Future<void> startMining() async {
-    await _call<void>('await window.Bee.startMining();');
+  Future<void> startMining({String? walletId}) async {
+    final arg = walletId == null ? '' : jsonEncode(walletId);
+    await _call<void>('await window.Bee.startMining($arg);');
     _startPolling();
   }
 
   @override
-  Future<void> stopMining() async {
-    await _call<void>('await window.Bee.stopMining();');
+  Future<void> stopMining({String? walletId}) async {
+    final arg = walletId == null ? '' : jsonEncode(walletId);
+    await _call<void>('await window.Bee.stopMining($arg);');
     _stopPolling();
   }
 
