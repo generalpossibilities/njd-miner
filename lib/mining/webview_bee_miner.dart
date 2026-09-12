@@ -63,6 +63,7 @@ class WebViewBeeMiner implements BeeMiner {
   Completer<void>? _connectCompleter;
   Timer? _balanceTimer;
   Timer? _minerDataTimer;
+  Timer? _timerKeepaliveTimer;
 
   @override
   Stream<MinerState> get states => _stateController.stream;
@@ -444,6 +445,26 @@ class WebViewBeeMiner implements BeeMiner {
       const Duration(seconds: 5),
       (_) => _call<void>('await window.Bee.minerData();').catchError((_) {}),
     );
+    // Keep JS timers alive while backgrounded / screen-off.
+    //
+    // Android suspends a WebView's timers when its activity stops, which halts
+    // the mining loop mid-session. resumeTimers() is process-wide and undoes
+    // that, so re-asserting it on a short beat keeps the loop running. This is
+    // what the other repo's miner does (a 10s Handler calling resumeTimers),
+    // and it only holds up alongside the foreground service's PARTIAL_WAKE_LOCK
+    // and the battery-optimisation exemption — without those, Doze freezes the
+    // process and no amount of resumeTimers helps.
+    _timerKeepaliveTimer ??= Timer.periodic(
+      const Duration(seconds: 10),
+      (_) async {
+        try {
+          await _controller?.resumeTimers();
+          await _controller?.resume();
+        } catch (_) {
+          // Controller not attached yet, or the view is gone; next tick retries.
+        }
+      },
+    );
   }
 
   void _stopPolling() {
@@ -451,5 +472,7 @@ class WebViewBeeMiner implements BeeMiner {
     _balanceTimer = null;
     _minerDataTimer?.cancel();
     _minerDataTimer = null;
+    _timerKeepaliveTimer?.cancel();
+    _timerKeepaliveTimer = null;
   }
 }
