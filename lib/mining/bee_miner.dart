@@ -236,6 +236,9 @@ abstract class BeeMiner {
   Future<void> refreshBalance();
 
   /// Disconnect the wallet: stop mining, revoke the session, clear stored keys.
+  /// Recent runner log lines, newest last.
+  List<String> get logLines => const [];
+
   Future<void> disconnect();
 
   /// Reload the underlying host and re-run [initialize] — used by the on-screen

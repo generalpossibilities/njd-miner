@@ -32,6 +32,13 @@ function log(...args) {
     .join(" ");
   if (logEl) logEl.textContent = `${line}\n${logEl.textContent}`.slice(0, 4000);
   console.log("[bee]", ...args);
+  // Forward to Dart. The WebView is offstage, so without this the log only
+  // exists in a DOM node nobody can see and in adb logcat.
+  try {
+    emit("log", { line, at: Date.now() });
+  } catch {
+    // emit() is defined below this point during module init; ignore until ready.
+  }
 }
 
 /** Post an event to Dart. Buffers until the inappwebview bridge exists — the

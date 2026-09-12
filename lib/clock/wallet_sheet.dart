@@ -215,11 +215,6 @@ class _WalletSheetState extends State<WalletSheet> {
         const SizedBox(height: 8),
         Row(
           children: [
-            OutlinedButton.icon(
-              onPressed: _busy ? null : () => widget.miner.claimReward(),
-              icon: const Icon(Icons.savings_outlined, size: 16),
-              label: const Text('Claim reward'),
-            ),
             const Spacer(),
             TextButton(
               onPressed: _busy ? null : _disconnect,
@@ -228,26 +223,50 @@ class _WalletSheetState extends State<WalletSheet> {
             ),
           ],
         ),
-        if (state.balanceDebug != null) ...[
-          const SizedBox(height: 16),
-          const Text(
-            'Raw balance maps (diagnostic)',
-            style: TextStyle(color: Colors.white38, fontSize: 11),
-          ),
-          const SizedBox(height: 4),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.white10,
-              borderRadius: BorderRadius.circular(8),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            const Text(
+              'Log',
+              style: TextStyle(color: Colors.white38, fontSize: 11),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: SelectableText(
-                    state.balanceDebug!,
+            const Spacer(),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.copy, size: 14, color: Colors.white38),
+              onPressed: () => Clipboard.setData(
+                ClipboardData(text: widget.miner.logLines.join('\n')),
+              ),
+            ),
+          ],
+        ),
+        Container(
+          width: double.infinity,
+          height: 180,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white10,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Builder(
+            builder: (_) {
+              final lines = widget.miner.logLines;
+              if (lines.isEmpty) {
+                return const Text(
+                  'No log output yet.',
+                  style: TextStyle(color: Colors.white38, fontSize: 10),
+                );
+              }
+              // Newest first: the interesting line is almost always the last
+              // thing that happened, and this panel is short.
+              final shown = lines.reversed.toList();
+              return ListView.builder(
+                padding: EdgeInsets.zero,
+                itemCount: shown.length,
+                itemBuilder: (_, i) => Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text(
+                    shown[i],
                     style: const TextStyle(
                       color: Colors.white60,
                       fontSize: 10,
@@ -255,18 +274,10 @@ class _WalletSheetState extends State<WalletSheet> {
                     ),
                   ),
                 ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.copy, size: 14, color: Colors.white38),
-                  onPressed:
-                      () => Clipboard.setData(
-                        ClipboardData(text: state.balanceDebug!),
-                      ),
-                ),
-              ],
-            ),
+              );
+            },
           ),
-        ],
+        ),
       ],
     );
   }

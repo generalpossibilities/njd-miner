@@ -45,6 +45,13 @@ class WebViewBeeMiner implements BeeMiner {
   Completer<void> _webViewReady = Completer<void>();
 
   final _stateController = StreamController<MinerState>.broadcast();
+  /// Recent runner log lines, newest last. Bounded so a long session cannot
+  /// grow this without limit.
+  static const int _maxLogLines = 300;
+  final List<String> _logLines = [];
+  @override
+  List<String> get logLines => List.unmodifiable(_logLines);
+
   MinerState _state = MinerState.initial;
 
   Completer<void>? _connectCompleter;
@@ -276,6 +283,15 @@ class WebViewBeeMiner implements BeeMiner {
                 connected ? MinerPhase.needsMiningKeys : MinerPhase.needsWallet,
           ),
         );
+        break;
+      case 'log':
+        final line = raw['line']?.toString();
+        if (line != null && line.isNotEmpty) {
+          _logLines.add(line);
+          if (_logLines.length > _maxLogLines) {
+            _logLines.removeRange(0, _logLines.length - _maxLogLines);
+          }
+        }
         break;
       case 'wallet_connected':
         _connectCompleter?.complete();
