@@ -148,7 +148,9 @@ function minerDataPayload(d) {
 }
 function emitMinerData(d) {
   const p = minerDataPayload(d);
-  log("miner_data", JSON.stringify(p));
+  // Deliberately not logged. This is called on every tap_sum poll — up to a
+  // dozen times a session — and dumping the whole payload buried everything
+  // that actually matters. The UI gets the data through the event.
   emit("miner_data", p);
 }
 
@@ -415,13 +417,13 @@ async function runSessionLoop() {
 
       for (
         let w = 0;
-        w < 60 && M.running && !proofSubmitted && !sessionErr && !sessionEmpty;
+        w < 120 && M.running && !proofSubmitted && !sessionErr && !sessionEmpty;
         w++
       ) {
-        await sleep(3000);
+        await sleep(5000);
       }
       if (!proofSubmitted && !sessionErr && !sessionEmpty) {
-        log("proof never confirmed within 180s — session may be left pending");
+        log("proof not confirmed in 600s — session may be left pending");
       }
 
       // tap_sum after — poll until it reflects this session (cap ~48 s).

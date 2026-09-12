@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -8,25 +9,29 @@ import '../mining/bee_miner.dart';
 import 'app_control.dart';
 import 'overlay_link.dart';
 
-/// Bounds for the floating clock window.
+/// Opening size for the floating clock, in dp.
 ///
-/// It is freely resizable between these — the point of the clock is to sit over
-/// another app, and how small that needs to be is the user's call, not a set of
-/// presets. [minWidth]/[minHeight] are the smallest at which the time and the
-/// two buttons still render; below that the window would be a blank sliver.
-class OverlaySizeBounds {
-  OverlaySizeBounds._();
+/// The plugin takes dp and converts to px itself. The old default was a flat
+/// 620dp wide — wider than most phones, so the window opened larger than the
+/// screen. These are computed against the real display instead, and the clock
+/// steps down from here via the button on it.
+class OverlayStartSize {
+  OverlayStartSize._();
 
-  static const int minWidth = 96;
-  static const int minHeight = 44;
-  static const int maxWidth = 900;
-  static const int maxHeight = 600;
+  static Size _screenDp() {
+    final d = WidgetsBinding.instance.platformDispatcher.views.first.display;
+    return d.size / d.devicePixelRatio;
+  }
 
-  static const int defaultWidth = 620;
-  static const int defaultHeight = 220;
+  static int get width {
+    final s = _screenDp();
+    return (s.width * 0.95).clamp(96.0, s.width - 8).round();
+  }
 
-  static int clampWidth(num v) => v.clamp(minWidth, maxWidth).round();
-  static int clampHeight(num v) => v.clamp(minHeight, maxHeight).round();
+  static int get height {
+    final s = _screenDp();
+    return (s.height * 0.26).clamp(44.0, s.height - 8).round();
+  }
 }
 
 /// Main-app side of the floating clock. Owns the show/hide toggle and keeps the
@@ -91,8 +96,8 @@ class OverlayManager extends ChangeNotifier {
     if (!await ensurePermission()) return;
     _link ??= FlutterOverlayWindow.overlayListener.listen(_onOverlayMessage);
     await FlutterOverlayWindow.showOverlay(
-      height: OverlaySizeBounds.defaultHeight,
-      width: OverlaySizeBounds.defaultWidth,
+      height: OverlayStartSize.height,
+      width: OverlayStartSize.width,
       alignment: OverlayAlignment.topCenter,
       flag: OverlayFlag.defaultFlag,
       enableDrag: true,

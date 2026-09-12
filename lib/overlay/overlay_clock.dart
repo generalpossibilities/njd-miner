@@ -9,7 +9,6 @@ import '../mining/bee_miner.dart';
 import '../mining/webview_bee_miner.dart';
 import 'app_control.dart';
 import 'overlay_link.dart';
-import 'overlay_manager.dart';
 
 /// The floating always-on-top clock. Runs in the overlay isolate (a separate
 /// FlutterEngine), so it builds its **own** [WebViewBeeMiner]. Because both
@@ -32,46 +31,47 @@ class _OverlayClockState extends State<OverlayClock> {
   /// Set when reopening the app failed, so the button is not silently dead.
   bool _restoreFailed = false;
 
-  /// Current window size in the units showOverlay/resizeOverlay use.
-  int _w = OverlaySizeBounds.defaultWidth;
-  int _h = OverlaySizeBounds.defaultHeight;
+  /// Which size step the clock is on. Tapping the button walks
+  /// default -> small -> smaller -> smallest -> default.
+  ///
+  /// Dragging a corner was fiddly on a window this small — the grip competed
+  /// with the drag-to-move gesture and needed precision on a moving target. A
+  /// tap is unambiguous.
+  int _step = 0;
 
-  /// Throttle for resize calls during a drag — each one crosses a platform
-  /// channel and re-lays out the window, so firing on every pointer sample is
-  /// wasteful and visibly janky.
-  DateTime _lastResize = DateTime.fromMillisecondsSinceEpoch(0);
-
-  /// Drag the corner grip to any size between the bounds. Presets were the
-  /// wrong model: how small this needs to be depends on what it is sitting on
-  /// top of.
-  void _onResizeDrag(DragUpdateDetails d) {
-    final w = OverlaySizeBounds.clampWidth(_w + d.delta.dx);
-    final h = OverlaySizeBounds.clampHeight(_h + d.delta.dy);
-    if (w == _w && h == _h) return;
-    setState(() {
-      _w = w;
-      _h = h;
-    });
-    final now = DateTime.now();
-    if (now.difference(_lastResize).inMilliseconds < 40) return;
-    _lastResize = now;
-    FlutterOverlayWindow.resizeOverlay(_w, _h, true);
+  /// Screen size in dp. The overlay plugin takes dp (it calls dpToPx itself), so
+  /// sizes are computed against this and can never exceed the display — the old
+  /// default was a flat 620dp wide, wider than most phones.
+  Size get _screenDp {
+    final d = WidgetsBinding.instance.platformDispatcher.views.first.display;
+    return d.size / d.devicePixelRatio;
   }
 
-  /// Commit the final size when the finger lifts, in case the last move was
-  /// swallowed by the throttle.
-  void _onResizeEnd(DragEndDetails _) {
-    FlutterOverlayWindow.resizeOverlay(_w, _h, true);
+  /// The size steps, as fractions of the screen so they hold on any device.
+  List<List<int>> get _steps {
+    final s = _screenDp;
+    int w(double f) => (s.width * f).clamp(96.0, s.width - 8).round();
+    int h(double f) => (s.height * f).clamp(44.0, s.height - 8).round();
+    return [
+      [w(0.95), h(0.26)], // default
+      [w(0.62), h(0.16)], // small
+      [w(0.42), h(0.11)], // smaller
+      [w(0.28), h(0.075)], // smallest
+    ];
   }
 
-  /// Double-tap the grip to snap back to the default size — a way out of having
-  /// dragged it too small to grab comfortably.
-  void _resetSize() {
-    setState(() {
-      _w = OverlaySizeBounds.defaultWidth;
-      _h = OverlaySizeBounds.defaultHeight;
-    });
-    FlutterOverlayWindow.resizeOverlay(_w, _h, true);
+  int get _w => _steps[_step][0];
+  int get _h => _steps[_step][1];
+
+  Future<void> _cycleSize() async {
+    setState(() => _step = (_step + 1) % _steps.length);
+    await FlutterOverlayWindow.resizeOverlay(_w, _h, true);
+  }
+
+  /// Long-press to jump straight back to the default size.
+  Future<void> _resetSize() async {
+    setState(() => _step = 0);
+    await FlutterOverlayWindow.resizeOverlay(_w, _h, true);
   }
 
   /// True when the window is too short to carry anything but the time.
@@ -253,17 +253,18 @@ class _OverlayClockState extends State<OverlayClock> {
                         _restoreFailed ? 'Could not reopen app' : 'Reopen app',
                         _restoreApp,
                       ),
-                      // Corner grip: drag to resize freely, double-tap to
-                      // restore the default size.
+                      // Tap to step down through the sizes and wrap back to
+                      // default; long-press to jump straight back.
                       GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onPanUpdate: _onResizeDrag,
-                        onPanEnd: _onResizeEnd,
-                        onDoubleTap: _resetSize,
-                        child: const Padding(
-                          padding: EdgeInsets.all(4),
+                        onTap: _cycleSize,
+                        onLongPress: _resetSize,
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
                           child: Icon(
-                            Icons.open_with,
+                            _step == 0
+                                ? Icons.close_fullscreen
+                                : Icons.open_in_full,
                             size: 14,
                             color: Colors.white54,
                           ),
