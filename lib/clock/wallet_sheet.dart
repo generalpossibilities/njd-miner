@@ -214,54 +214,68 @@ class _WalletSheetState extends State<WalletSheet> {
             ),
           ],
         ),
-        for (final w in wallets)
-          InkWell(
-            onTap:
-                _busy || w['walletId'] == selected
-                    ? null
-                    : () async {
-                      await widget.miner.selectWallet('${w['walletId']}');
-                      if (mounted) setState(() {});
-                    },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  Icon(
-                    w['walletId'] == selected
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
-                    size: 16,
-                    color:
-                        w['walletId'] == selected
-                            ? const Color(0xFFFFC531)
-                            : Colors.white24,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${w['walletName'] ?? 'wallet'}',
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color:
-                            w['walletId'] == selected
-                                ? Colors.white
-                                : Colors.white54,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                  if (w['keysReady'] != true)
-                    const Text(
-                      'keys pending',
-                      style: TextStyle(color: Colors.orangeAccent, fontSize: 10),
-                    ),
-                ],
-              ),
-            ),
+        for (final w in wallets) _walletRow(w, w['walletId'] == selected),
+        if (wallets.length > 1) ...[
+          const SizedBox(height: 4),
+          Text(
+            // The figures below are one wallet's, and with several connected it
+            // is otherwise impossible to tell whose.
+            'Showing ${wallets.firstWhere((w) => w['walletId'] == selected, orElse: () => wallets.first)['walletName'] ?? 'wallet'} — tap another to switch',
+            style: const TextStyle(color: Colors.white30, fontSize: 10),
           ),
+        ],
         const Divider(color: Colors.white12, height: 20),
       ],
+    );
+  }
+
+  Widget _walletRow(Map<String, dynamic> w, bool isSelected) {
+    final mining = w['mining'] == true;
+    final keysReady = w['keysReady'] == true;
+    return InkWell(
+      onTap: _busy || isSelected
+          ? null
+          : () async {
+              setState(() => _busy = true);
+              try {
+                await widget.miner.selectWallet('${w['walletId']}');
+              } finally {
+                if (mounted) setState(() => _busy = false);
+              }
+            },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 7),
+        child: Row(
+          children: [
+            Icon(
+              isSelected
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked,
+              size: 16,
+              color: isSelected ? const Color(0xFFFFC531) : Colors.white24,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${w['walletName'] ?? 'wallet'}',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.white54,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            // Per-wallet state, so the list answers "is that one working?"
+            // without having to select each in turn.
+            if (!keysReady)
+              const _Chip(text: 'keys pending', color: Colors.orangeAccent)
+            else if (mining)
+              const _Chip(text: 'mining', color: Color(0xFF6BE28B))
+            else
+              const _Chip(text: 'idle', color: Colors.white38),
+          ],
+        ),
+      ),
     );
   }
 
@@ -457,6 +471,26 @@ class _WalletSheetState extends State<WalletSheet> {
           style: TextStyle(color: Colors.white38, fontSize: 12),
         ),
       ],
+    );
+  }
+}
+
+/// Compact status pill used in the wallet list.
+class _Chip extends StatelessWidget {
+  const _Chip({required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(text, style: TextStyle(color: color, fontSize: 9)),
     );
   }
 }

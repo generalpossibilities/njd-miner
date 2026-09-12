@@ -231,7 +231,9 @@ function minerDataPayload(d) {
 }
 function emitMinerData(d) {
   const p = minerDataPayload(d);
-  log("miner_data", JSON.stringify(p));
+  // Deliberately not logged. This is called on every tap_sum poll — up to a
+  // dozen times a session — and dumping the whole payload buried everything
+  // that actually matters. The UI gets the data through the event.
   emit("miner_data", p);
 }
 
@@ -512,13 +514,13 @@ async function runSessionLoop(W) {
 
       for (
         let w = 0;
-        w < 60 && W.running && !proofSubmitted && !sessionErr && !sessionEmpty;
+        w < 120 && W.running && !proofSubmitted && !sessionErr && !sessionEmpty;
         w++
       ) {
-        await sleep(3000);
+        await sleep(5000);
       }
       if (!proofSubmitted && !sessionErr && !sessionEmpty) {
-        log("proof never confirmed within 180s — session may be left pending");
+        log("proof not confirmed in 600s — session may be left pending");
       }
 
       // tap_sum after — poll until it reflects this session (cap ~48 s).
@@ -617,6 +619,15 @@ window.Bee = {
       this.refreshBalance().catch(() => {});
     }
     return { connected: !!sel, wallets: M.wallets.size };
+  },
+
+  /** Point the runner at a wallet. The UI tracked its own selection, but every
+   *  per-wallet read here (balance, miner data, reward) defaults to M.selected —
+   *  so without this, picking a different wallet in the UI kept returning the
+   *  first one's data. */
+  async selectWallet(id) {
+    if (M.wallets.has(id)) M.selected = id;
+    return { selected: M.selected };
   },
 
   /** The connected wallets. The UI re-reads this after connect/disconnect

@@ -95,6 +95,16 @@ class WebViewBeeMiner implements BeeMiner {
   Future<void> selectWallet(String walletId) async {
     if (_selectedWalletId == walletId) return;
     _selectedWalletId = walletId;
+    // Move the runner's own selection too. Every per-wallet read there defaults
+    // to it, so tracking selection only on this side meant balance and miner
+    // data kept coming back for whichever wallet connected last.
+    try {
+      await _call<Map<dynamic, dynamic>>(
+        'return await window.Bee.selectWallet(${jsonEncode(walletId)});',
+      );
+    } catch (_) {
+      // Selection is still useful locally even if the runner call fails.
+    }
     // The other wallets keep mining; only what the UI follows changes. Reset the
     // per-session figures so the new wallet's first event does not land on top
     // of the previous wallet's counters.
@@ -107,6 +117,11 @@ class WebViewBeeMiner implements BeeMiner {
       ),
     );
     await refreshBalance();
+    try {
+      await _call<void>('await window.Bee.minerData();');
+    } catch (_) {
+      // On-chain figures will refresh on the next periodic poll anyway.
+    }
   }
 
   bool _isOtherWallet(Map<dynamic, dynamic> raw) {
