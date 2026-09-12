@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../config/bee_config.dart';
 import '../mining/bee_miner.dart';
@@ -44,7 +43,10 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    WakelockPlus.enable();
+    // No WakelockPlus.enable() here. Holding the screen on was compensating for
+    // mining that stopped when the display slept; the resumeTimers keepalive in
+    // webview_bee_miner now carries it through screen-off, so forcing the
+    // display to stay lit only costs battery.
 
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       setState(() => _now = DateTime.now());
@@ -116,7 +118,6 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
     _ticker.cancel();
     _sub?.cancel();
     widget.overlay.removeListener(_onOverlay);
-    WakelockPlus.disable();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
