@@ -52,6 +52,12 @@ class WebViewBeeMiner implements BeeMiner {
   @override
   List<String> get logLines => List.unmodifiable(_logLines);
 
+  @override
+  void clearLog() {
+    _logLines.clear();
+    _set(_state);
+  }
+
   MinerState _state = MinerState.initial;
 
   Completer<void>? _connectCompleter;

@@ -239,6 +239,9 @@ abstract class BeeMiner {
   /// Recent runner log lines, newest last.
   List<String> get logLines => const [];
 
+  /// Drop everything currently in [logLines].
+  void clearLog() {}
+
   Future<void> disconnect();
 
   /// Reload the underlying host and re-run [initialize] — used by the on-screen

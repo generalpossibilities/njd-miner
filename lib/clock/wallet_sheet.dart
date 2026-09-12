@@ -197,21 +197,6 @@ class _WalletSheetState extends State<WalletSheet> {
         ),
         _balanceRow('Mining-duration sum', state.miningDurSum),
         const SizedBox(height: 8),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          dense: true,
-          value: widget.overlay.active,
-          onChanged: (_) => widget.overlay.toggle(),
-          title: const Text(
-            'Floating clock',
-            style: TextStyle(color: Colors.white, fontSize: 14),
-          ),
-          subtitle: const Text(
-            'A draggable clock over other apps that keeps mining. Needs '
-            '"display over other apps" permission.',
-            style: TextStyle(color: Colors.white38, fontSize: 11),
-          ),
-        ),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -233,16 +218,29 @@ class _WalletSheetState extends State<WalletSheet> {
             const Spacer(),
             IconButton(
               visualDensity: VisualDensity.compact,
+              tooltip: 'Copy log',
               icon: const Icon(Icons.copy, size: 14, color: Colors.white38),
               onPressed: () => Clipboard.setData(
                 ClipboardData(text: widget.miner.logLines.join('\n')),
               ),
             ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Clear log',
+              icon: const Icon(
+                Icons.delete_outline,
+                size: 16,
+                color: Colors.white38,
+              ),
+              onPressed: () => setState(() => widget.miner.clearLog()),
+            ),
           ],
         ),
         Container(
           width: double.infinity,
-          height: 180,
+          // Taller now the floating-clock switch has gone from above it — the
+          // log is what this space is actually useful for.
+          height: 300,
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: Colors.white10,
