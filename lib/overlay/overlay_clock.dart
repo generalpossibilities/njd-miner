@@ -29,17 +29,53 @@ class OverlayClock extends StatefulWidget {
 class _OverlayClockState extends State<OverlayClock> {
   static const Duration _probeTimeout = Duration(seconds: 12);
 
-  /// Current window size. The overlay starts at whatever showOverlay asked for.
-  OverlaySize _size = OverlaySize.normal;
-
   /// Set when reopening the app failed, so the button is not silently dead.
   bool _restoreFailed = false;
 
-  Future<void> _cycleSize() async {
-    final next = _size.next;
-    await FlutterOverlayWindow.resizeOverlay(next.width, next.height, true);
-    if (mounted) setState(() => _size = next);
+  /// Current window size in the units showOverlay/resizeOverlay use.
+  int _w = OverlaySizeBounds.defaultWidth;
+  int _h = OverlaySizeBounds.defaultHeight;
+
+  /// Throttle for resize calls during a drag — each one crosses a platform
+  /// channel and re-lays out the window, so firing on every pointer sample is
+  /// wasteful and visibly janky.
+  DateTime _lastResize = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Drag the corner grip to any size between the bounds. Presets were the
+  /// wrong model: how small this needs to be depends on what it is sitting on
+  /// top of.
+  void _onResizeDrag(DragUpdateDetails d) {
+    final w = OverlaySizeBounds.clampWidth(_w + d.delta.dx);
+    final h = OverlaySizeBounds.clampHeight(_h + d.delta.dy);
+    if (w == _w && h == _h) return;
+    setState(() {
+      _w = w;
+      _h = h;
+    });
+    final now = DateTime.now();
+    if (now.difference(_lastResize).inMilliseconds < 40) return;
+    _lastResize = now;
+    FlutterOverlayWindow.resizeOverlay(_w, _h, true);
   }
+
+  /// Commit the final size when the finger lifts, in case the last move was
+  /// swallowed by the throttle.
+  void _onResizeEnd(DragEndDetails _) {
+    FlutterOverlayWindow.resizeOverlay(_w, _h, true);
+  }
+
+  /// Double-tap the grip to snap back to the default size — a way out of having
+  /// dragged it too small to grab comfortably.
+  void _resetSize() {
+    setState(() {
+      _w = OverlaySizeBounds.defaultWidth;
+      _h = OverlaySizeBounds.defaultHeight;
+    });
+    FlutterOverlayWindow.resizeOverlay(_w, _h, true);
+  }
+
+  /// True when the window is too short to carry anything but the time.
+  bool get _isCompact => _h < 90 || _w < 240;
 
   Future<void> _restoreApp() async {
     final ok = await AppControl.bringAppToFront();
@@ -178,8 +214,8 @@ class _OverlayClockState extends State<OverlayClock> {
                 border: Border.all(color: const Color(0x22FFFFFF)),
               ),
               padding: EdgeInsets.symmetric(
-                horizontal: _size == OverlaySize.tiny ? 8 : 14,
-                vertical: _size == OverlaySize.tiny ? 4 : 10,
+                horizontal: _isCompact ? 8 : 14,
+                vertical: _isCompact ? 4 : 10,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -194,7 +230,7 @@ class _OverlayClockState extends State<OverlayClock> {
                           color: Colors.white,
                           // At tiny the clock is most of the window, so the time
                           // shrinks with it rather than overflowing.
-                          fontSize: _size == OverlaySize.tiny ? 20 : 30,
+                          fontSize: _isCompact ? 18 : 30,
                           fontWeight: FontWeight.w200,
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
@@ -217,18 +253,27 @@ class _OverlayClockState extends State<OverlayClock> {
                         _restoreFailed ? 'Could not reopen app' : 'Reopen app',
                         _restoreApp,
                       ),
-                      _iconButton(
-                        _size == OverlaySize.normal
-                            ? Icons.close_fullscreen
-                            : Icons.aspect_ratio,
-                        'Resize',
-                        _cycleSize,
+                      // Corner grip: drag to resize freely, double-tap to
+                      // restore the default size.
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onPanUpdate: _onResizeDrag,
+                        onPanEnd: _onResizeEnd,
+                        onDoubleTap: _resetSize,
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.open_with,
+                            size: 14,
+                            color: Colors.white54,
+                          ),
+                        ),
                       ),
                     ],
                   ),
                   // The status line is the first thing to go when the window is
                   // too small to carry it.
-                  if (_size != OverlaySize.tiny) ...[
+                  if (!_isCompact) ...[
                     const SizedBox(height: 2),
                     Text(
                       _displayOnly

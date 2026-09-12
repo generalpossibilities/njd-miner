@@ -48,6 +48,13 @@ class WebViewBeeMiner implements BeeMiner {
   MinerState _state = MinerState.initial;
 
   /// Wallets the runner knows about: {walletId, walletName, keysReady}.
+  /// Recent runner log lines, newest last. Bounded so a long session cannot
+  /// grow this without limit.
+  static const int _maxLogLines = 300;
+  final List<String> _logLines = [];
+  @override
+  List<String> get logLines => List.unmodifiable(_logLines);
+
   List<Map<String, dynamic>> _wallets = const [];
   @override
   List<Map<String, dynamic>> get wallets => _wallets;
@@ -59,6 +66,30 @@ class WebViewBeeMiner implements BeeMiner {
   String? _selectedWalletId;
   @override
   String? get selectedWalletId => _selectedWalletId;
+
+  /// Re-read the wallet list from the runner.
+  ///
+  /// The `ready` event carries it too, but that fires once at init, so it is
+  /// stale the moment a wallet is added — which is why a newly connected wallet
+  /// appeared alone and the earlier one vanished from the sheet.
+  @override
+  Future<void> refreshWallets() async {
+    try {
+      final res = await _call<List<dynamic>>(
+        'return await window.Bee.listWallets();',
+      );
+      _wallets = res
+          .whereType<Map>()
+          .map((w) => w.map((k, v) => MapEntry(k.toString(), v)))
+          .toList();
+      if (_selectedWalletId == null && _wallets.isNotEmpty) {
+        _selectedWalletId = _wallets.first['walletId']?.toString();
+      }
+      _set(_state);
+    } catch (_) {
+      // Leave the previous list in place; a failed refresh should not blank the UI.
+    }
+  }
 
   @override
   Future<void> selectWallet(String walletId) async {
@@ -327,12 +358,23 @@ class WebViewBeeMiner implements BeeMiner {
           ),
         );
         break;
+      case 'log':
+        final line = raw['line']?.toString();
+        if (line != null && line.isNotEmpty) {
+          _logLines.add(line);
+          if (_logLines.length > _maxLogLines) {
+            _logLines.removeRange(0, _logLines.length - _maxLogLines);
+          }
+        }
+        break;
       case 'wallet_connected':
         // A newly connected wallet becomes the one the UI follows, matching the
         // runner, which selects it so the authorise step acts on it.
         _selectedWalletId = raw['walletId']?.toString() ?? _selectedWalletId;
         _connectCompleter?.complete();
         _connectCompleter = null;
+        // The list the sheet renders must include the wallet just added.
+        unawaited(refreshWallets());
         _set(
           _state.copyWith(
             phase: MinerPhase.needsMiningKeys,
@@ -464,6 +506,7 @@ class WebViewBeeMiner implements BeeMiner {
         }
         break;
       case 'disconnected':
+        unawaited(refreshWallets());
         _set(const MinerState(phase: MinerPhase.needsWallet));
         break;
     }

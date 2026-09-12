@@ -33,6 +33,17 @@ class _NjdMinerAppState extends State<NjdMinerApp> {
   late final OverlayManager _overlay = OverlayManager(_miner);
 
   @override
+  void initState() {
+    super.initState();
+    // The floating clock is on by default; restoreOnStartup honours a previous
+    // explicit "off" and otherwise shows it once the first frame is up (the
+    // permission prompt needs an attached activity).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _overlay.restoreOnStartup();
+    });
+  }
+
+  @override
   void dispose() {
     _overlay.dispose();
     _miner.dispose();

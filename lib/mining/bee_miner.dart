@@ -251,6 +251,13 @@ abstract class BeeMiner {
   /// Point the UI at [walletId]. Mining on the other wallets is unaffected.
   Future<void> selectWallet(String walletId) async {}
 
+  /// Re-read the wallet list from the runner. The `ready` event carries it but
+  /// fires only at init, so it is stale as soon as a wallet is added.
+  Future<void> refreshWallets() async {}
+
+  /// Recent runner log lines, newest last.
+  List<String> get logLines => const [];
+
   /// Disconnect the selected wallet. The others keep mining.
   Future<void> disconnect();
 
