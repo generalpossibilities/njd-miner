@@ -34,7 +34,15 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.njd.njd_miner"
+        // Distinct from main's com.njd.njd_miner so both builds can sit on the
+        // same phone at once. Android keys an install on applicationId, so this
+        // also gives the single-wallet build its own storage — its wallet and
+        // mining keys are separate from the multi-wallet build's, not shared.
+        //
+        // `namespace` above is deliberately unchanged: that is the code package
+        // MainActivity actually lives in, and moving it would break the manifest's
+        // ".MainActivity" reference.
+        applicationId = "com.njd.njd_miner.single"
         // flutter_inappwebview requires 21+; foreground service types push us to 23+.
         minSdk = maxOf(flutter.minSdkVersion, 23)
         targetSdk = flutter.targetSdkVersion
