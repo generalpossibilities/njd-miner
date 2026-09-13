@@ -120,14 +120,23 @@ class _WalletSheetState extends State<WalletSheet> {
   @override
   Widget build(BuildContext context) {
     final state = widget.miner.state;
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 24,
-        right: 24,
-        top: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+    // The body scrolls. isScrollControlled on showModalBottomSheet only lets the
+    // sheet grow taller than half the screen — it does not make the contents
+    // scroll, so on a short screen the log and controls ran off the bottom with
+    // no way to reach them. Capped at 88% so it never swallows the screen.
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.88,
       ),
-      child: Column(
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: EdgeInsets.only(
+            left: 24,
+            right: 24,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+          ),
+          child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -167,7 +176,9 @@ class _WalletSheetState extends State<WalletSheet> {
               style: const TextStyle(color: Colors.redAccent, fontSize: 12),
             ),
           ],
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }

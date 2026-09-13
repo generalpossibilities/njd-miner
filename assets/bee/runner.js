@@ -288,6 +288,8 @@ async function runSessionLoop() {
     M.currentMiner = null;
   };
 
+  logMsg("loop started");
+
   while (M.running) {
     const k = M.conn ? readKeys(M.conn) : null;
     if (!k?.areKeysPropagated || !k.minerAddress) {
@@ -296,6 +298,7 @@ async function runSessionLoop() {
     }
 
     if (M.epochTaps >= cfg.maxTapsPerEpoch) {
+      logMsg(`epoch tap budget reached (${M.epochTaps}/${cfg.maxTapsPerEpoch}) — waiting`);
       emitSession("waiting", { reason: "epoch tap budget reached" });
       await sleep(60000);
       continue;
@@ -310,6 +313,7 @@ async function runSessionLoop() {
       // Seeds exhausted (or a worker somehow still running): this instance is
       // spent, so build a fresh one on the next pass.
       if (!(await miner.can_start())) {
+        logMsg("can_start=false — 30s wait");
         emitSession("waiting", { reason: "no seed available yet" });
         dropMiner();
         await sleep(30000);
@@ -332,7 +336,7 @@ async function runSessionLoop() {
         emitMinerData(d);
         d?.free?.();
       } catch (e) {
-        log("pre tap_sum", String(e?.message || e));
+        logMsg("pre tap_sum error:", String(e?.message || e));
       }
 
       // start session, wait for the worker's first callback (2s cap)
@@ -368,6 +372,9 @@ async function runSessionLoop() {
             proofSubmitted = true;
           } else if (e.action === "session_accepted") {
             sessionAccepted = true;
+          }
+          if (e.action === "computation_completed") {
+            logMsg(`computation done${e.data?.empty ? " (empty trees — no taps?)" : ""}, submitting`);
           }
           if (["submit_session_root", "submit_session_proof", "session_accepted"].includes(e.action)) {
             logMsg(e.action);
@@ -444,7 +451,7 @@ async function runSessionLoop() {
         await sleep(5000);
       }
       if (!proofSubmitted && !sessionErr && !sessionEmpty) {
-        log("proof not confirmed in 600s — session may be left pending");
+        logMsg("proof not confirmed in 600s — session may be left pending");
       }
 
       // tap_sum after — poll until it reflects this session (cap ~48 s).
@@ -458,13 +465,16 @@ async function runSessionLoop() {
           d?.free?.();
           if (tapAfter > tapBefore) break;
         } catch (e) {
-          log("post tap_sum", String(e?.message || e));
+          logMsg("post tap_sum error:", String(e?.message || e));
         }
         await sleep(4000);
       }
       const confirmed = Math.max(0, tapAfter - tapBefore);
       M.confirmed = confirmed;
       M.epochTaps += confirmed;
+      logMsg(
+        `tap_sum: ${tapBefore} → ${tapAfter} (+${confirmed}) sent: ${M.tapsSent}`,
+      );
 
       // `get_reward` is documented as pointless more than once per reward
       // epoch (~1000 blocks), and it is one more external message against the
@@ -497,6 +507,10 @@ async function runSessionLoop() {
         empty: sessionEmpty,
         error: sessionErr,
       });
+      logMsg(
+        `session #${M.sessions} — sent:${M.tapsSent} confirmed:${confirmed}` +
+          `${sessionEmpty ? " EMPTY" : ""}${sessionErr ? " FAILED" : ""}`,
+      );
       emitSession("idle", { empty: sessionEmpty, error: sessionErr });
 
       window.Bee?.refreshBalance?.().catch(() => {});
