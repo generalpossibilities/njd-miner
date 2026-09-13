@@ -140,6 +140,47 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
     super.dispose();
   }
 
+  /// Short in-app guide, reachable from the clock face.
+  ///
+  /// The floating clock's controls are icons with no labels, so without this
+  /// there is nothing on screen that explains what they do.
+  void _showGuide() {
+    showDialog<void>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: const Color(0xFF1B1C1F),
+        title: const Text('How to use', style: TextStyle(fontSize: 16)),
+        content: const SingleChildScrollView(
+          child: Text(
+            'Long-press the screen/clock (or use the wallet panel) to open your '
+            'balances and log.\n'
+            '\n'
+            'Tap the clock face to add a bonus tap while a session is running.\n'
+            '\n'
+            'Floating clock\n'
+            'A small always-on-top clock that keeps mining while you use other '
+            'apps.\n'
+            '\n'
+            '  • Toggle it from the clock screen.\n'
+            '  • Tap the resize button to step through sizes: default → small → '
+            'smaller → smallest, then back.\n'
+            '  • Long-press it to jump back to default.\n'
+            '  • Tap the reopen button to bring the main app back when it is '
+            'minimised.\n'
+            '  • Drag it anywhere on screen.',
+            style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openWalletSheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -192,6 +233,18 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
                           key: ValueKey(_lastTapTime),
                           at: _lastTapAt!,
                         ),
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        child: IconButton(
+                          tooltip: 'How to use',
+                          onPressed: _showGuide,
+                          icon: const Icon(
+                            Icons.help_outline,
+                            color: Colors.white38,
+                          ),
+                        ),
+                      ),
                       Positioned(
                         top: 0,
                         right: 0,
