@@ -761,21 +761,21 @@ window.Bee = {
           this.refreshBalance().catch(() => {});
           return;
         }
-        if (already) {
-          emit("wallet_connected", {
-            walletId: walletId(conn),
-            walletName: conn.walletName,
-            alreadyConnected: true,
-          });
-          logMsg(`${conn.walletName} is already connected`);
-        }
+        if (already) logMsg(`${conn.walletName} is already connected`);
 
         writeSession(conn); // appends, or updates in place if already known
         walletFor(conn);
         // A freshly connected wallet becomes selected, so the authorise step
         // that follows acts on it.
         M.selected = walletId(conn);
-        emit("wallet_connected", { walletId: walletId(conn), walletName: conn.walletName });
+        // Emitted once, whether or not this was a reconnect — Dart completes the
+        // connect future and refreshes its wallet list on it, and firing twice
+        // made it do both twice.
+        emit("wallet_connected", {
+          walletId: walletId(conn),
+          walletName: conn.walletName,
+          alreadyConnected: !!already,
+        });
         this.refreshBalance().catch(() => {});
       } catch (e) {
         emit("connect_error", { error: String(e?.message || e) });

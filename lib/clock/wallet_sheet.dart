@@ -22,6 +22,7 @@ class WalletSheet extends StatefulWidget {
 }
 
 class _WalletSheetState extends State<WalletSheet> {
+  Timer? _walletPoll;
   WalletConnectRequest? _request;
   bool _busy = false;
   String? _error;
@@ -40,10 +41,19 @@ class _WalletSheetState extends State<WalletSheet> {
     widget.miner.refreshWallets().then((_) {
       if (mounted) setState(() {});
     });
+    // Keep the picker's mining/idle chips honest. They come from the runner's
+    // live loop state, which changes without the app doing anything — a wallet
+    // that stops on an error would otherwise keep showing "mining" until
+    // something else happened to refresh the list.
+    _walletPoll = Timer.periodic(const Duration(seconds: 5), (_) async {
+      await widget.miner.refreshWallets();
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _walletPoll?.cancel();
     _sub?.cancel();
     super.dispose();
   }
