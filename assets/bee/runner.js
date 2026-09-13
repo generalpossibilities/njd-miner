@@ -41,6 +41,12 @@ function log(...args) {
 /// spends against the per-account cap (session root, session proof, get_reward,
 /// cancel_session) and their retries. Everything else stays in the console:
 /// forwarding all of it buried the few lines worth reading.
+/** logMsg, prefixed with which wallet it is about. */
+function logW(W, ...args) {
+  const n = W?.conn?.walletName;
+  logMsg(n ? `[${n}]` : "[?]", ...args);
+}
+
 function logMsg(...args) {
   const line = args
     .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
@@ -82,7 +88,26 @@ setInterval(_flush, 1000); // cheap safety net for the life of the page
 // profileAddress:appId, so per-wallet mining keys were always multi-wallet
 // ready and migrate for free.
 function walletId(conn) {
-  return conn?.profileAddress || conn?.walletName || null;
+  // walletAddress is the wallet's on-chain multifactor address — one per wallet,
+  // stable across connects. profileAddress comes from the connect handshake and
+  // is not guaranteed to be the same next time, so keying on it let the *same*
+  // wallet register twice under two ids. Kept as a fallback for entries stored
+  // before this, and walletName last.
+  //
+  // Note keysKey() still keys mining keys on profileAddress — that is a separate
+  // namespace and must not change, or stored keys stop resolving.
+  return conn?.walletAddress || conn?.profileAddress || conn?.walletName || null;
+}
+
+/** An already-registered wallet matching `conn`, by identity or by name. */
+function findExistingWallet(conn) {
+  const id = walletId(conn);
+  if (id && M.wallets.has(id)) return M.wallets.get(id);
+  // Same human name is the same wallet as far as the user is concerned, even if
+  // the handshake handed us different addresses.
+  const name = conn?.walletName;
+  if (!name) return null;
+  return allWallets().find((W) => W.conn?.walletName === name) || null;
 }
 
 function readSessions() {
@@ -385,6 +410,8 @@ async function runSessionLoop(W) {
     W.currentMiner = null;
   };
 
+  logW(W, "loop started");
+
   while (W.running) {
     const k = W.conn ? readKeys(W.conn) : null;
     if (!k?.areKeysPropagated || !k.minerAddress) {
@@ -393,6 +420,7 @@ async function runSessionLoop(W) {
     }
 
     if (W.epochTaps >= cfg.maxTapsPerEpoch) {
+      logW(W, `epoch tap budget reached (${W.epochTaps}/${cfg.maxTapsPerEpoch}) — waiting`);
       emitSession(W, "waiting", { reason: "epoch tap budget reached" });
       await sleep(60000);
       continue;
@@ -407,6 +435,7 @@ async function runSessionLoop(W) {
       // Seeds exhausted (or a worker somehow still running): this instance is
       // spent, so build a fresh one on the next pass.
       if (!(await miner.can_start())) {
+        logW(W, "can_start=false — 30s wait");
         emitSession(W, "waiting", { reason: "no seed available yet" });
         dropMiner();
         await sleep(30000);
@@ -429,7 +458,7 @@ async function runSessionLoop(W) {
         emitMinerData(d);
         d?.free?.();
       } catch (e) {
-        log("pre tap_sum", String(e?.message || e));
+        logW(W, "pre tap_sum error:", String(e?.message || e));
       }
 
       // start session, wait for the worker's first callback (2s cap)
@@ -458,7 +487,7 @@ async function runSessionLoop(W) {
           } else if (e.action === "submit_session_root_retry" || e.action === "submit_session_proof_retry") {
             // Not a failure: the node's queue is full and the worker is resending
             // the same session. Only a give-up arrives as e.error.
-            logMsg(`${e.action === "submit_session_root_retry" ? "session root" : "session proof"} queue-full — resending (attempt ${e.data?.attempt})`);
+            logW(W, `${e.action === "submit_session_root_retry" ? "session root" : "session proof"} queue-full — resending (attempt ${e.data?.attempt})`);
           } else if (e.action === "computation_completed" && e.data?.empty) {
             sessionEmpty = true;
           } else if (e.action === "submit_session_proof") {
@@ -466,11 +495,14 @@ async function runSessionLoop(W) {
           } else if (e.action === "session_accepted") {
             sessionAccepted = true;
           }
+          if (e.action === "computation_completed") {
+            logW(W, `computation done${e.data?.empty ? " (empty trees — no taps?)" : ""}, submitting`);
+          }
           if (["submit_session_root", "submit_session_proof", "session_accepted"].includes(e.action)) {
-            logMsg(e.action);
+            logW(W, e.action);
           }
           if (e.error) {
-            logMsg(`${e.action} failed: ${e.error}${e.data?.message ? ` — ${e.data.message}` : ""}`);
+            logW(W, `${e.action} failed: ${e.error}${e.data?.message ? ` — ${e.data.message}` : ""}`);
           }
           if (["session_accepted", "submit_session_root", "submit_session_root_retry", "submit_session_proof", "submit_session_proof_retry", "computation_completed"].includes(e.action)) {
             emit("session_event", { action: e.action, error: e.error ?? null });
@@ -541,7 +573,7 @@ async function runSessionLoop(W) {
         await sleep(5000);
       }
       if (!proofSubmitted && !sessionErr && !sessionEmpty) {
-        log("proof not confirmed in 600s — session may be left pending");
+        logW(W, "proof not confirmed in 600s — session may be left pending");
       }
 
       // tap_sum after — poll until it reflects this session (cap ~48 s).
@@ -555,13 +587,17 @@ async function runSessionLoop(W) {
           d?.free?.();
           if (tapAfter > tapBefore) break;
         } catch (e) {
-          log("post tap_sum", String(e?.message || e));
+          logW(W, "post tap_sum error:", String(e?.message || e));
         }
         await sleep(4000);
       }
       const confirmed = Math.max(0, tapAfter - tapBefore);
       W.confirmed = confirmed;
       W.epochTaps += confirmed;
+      logW(
+        W,
+        `tap_sum: ${tapBefore} → ${tapAfter} (+${confirmed}) sent: ${W.tapsSent}`,
+      );
 
       // `get_reward` is documented as pointless more than once per reward
       // epoch (~1000 blocks), and it is one more external message against the
@@ -572,14 +608,14 @@ async function runSessionLoop(W) {
           try {
             await tx(() => miner.get_reward());
             W.lastRewardEpoch5m = epoch5m;
-            logMsg("get_reward sent");
+            logW(W, "get_reward sent");
             break;
           } catch (e) {
             if (isQueueFull(e) && r < 2) {
-              logMsg(`get_reward queue-full — retry ${r + 1}/3`);
+              logW(W, `get_reward queue-full — retry ${r + 1}/3`);
               await sleep((r + 1) * 20000);
             } else {
-              logMsg("get_reward failed:", String(e?.message || e));
+              logW(W, "get_reward failed:", String(e?.message || e));
               break;
             }
           }
@@ -594,6 +630,11 @@ async function runSessionLoop(W) {
         empty: sessionEmpty,
         error: sessionErr,
       });
+      logW(
+        W,
+        `session #${W.sessions} — sent:${W.tapsSent} confirmed:${confirmed}` +
+          `${sessionEmpty ? " EMPTY" : ""}${sessionErr ? " FAILED" : ""}`,
+      );
       emitSession(W, "idle", { empty: sessionEmpty, error: sessionErr });
 
       window.Bee?.refreshBalance?.().catch(() => {});
@@ -695,6 +736,40 @@ window.Bee = {
           description: session.description,
           sessionStateJson: hello.session_state_json,
         };
+        const already = findExistingWallet(conn);
+        const previousId = already ? walletId(already.conn) : null;
+        if (already && previousId !== walletId(conn)) {
+          // Same wallet, different handshake addresses: re-key the entry we
+          // already have instead of creating a second row for one wallet.
+          // previousId is captured before the reassignment below — deriving it
+          // afterwards would return the new id and delete the wrong key.
+          already.conn = conn;
+          writeSessions(
+            readSessions().map((c) =>
+              c.walletName === conn.walletName ? conn : c,
+            ),
+          );
+          M.wallets.delete(previousId);
+          M.wallets.set(walletId(conn), already);
+          M.selected = walletId(conn);
+          emit("wallet_connected", {
+            walletId: walletId(conn),
+            walletName: conn.walletName,
+            alreadyConnected: true,
+          });
+          logMsg(`${conn.walletName} was already connected — entry refreshed`);
+          this.refreshBalance().catch(() => {});
+          return;
+        }
+        if (already) {
+          emit("wallet_connected", {
+            walletId: walletId(conn),
+            walletName: conn.walletName,
+            alreadyConnected: true,
+          });
+          logMsg(`${conn.walletName} is already connected`);
+        }
+
         writeSession(conn); // appends, or updates in place if already known
         walletFor(conn);
         // A freshly connected wallet becomes selected, so the authorise step
