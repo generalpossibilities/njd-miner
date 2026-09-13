@@ -23,15 +23,12 @@ again when you press Stop.
 
 ## Keep it mining
 
-**Mining only runs while the app is open and the screen is on.** Android
-suspends the mining engine when the screen sleeps, so:
+Mining keeps going with the screen off and the app in the background — but
+only if you **allow the battery-optimisation prompt on first launch**. Without
+it Android freezes the app and mining stops. You can grant it later under
+Settings → Apps → NJD Miner → Battery → Unrestricted.
 
-- Set **Settings → Display → Screen timeout** to a long value (or Never) while mining.
-- Keep the app in the foreground, or use the **floating clock** so it keeps
-  running over other apps.
-- Allow the battery-optimisation prompt on first launch.
-
-Best used plugged in — mining is continuous work and will warm the phone.
+Best used plugged in: mining runs the CPU continuously and will warm the phone.
 
 ## Floating clock
 
@@ -64,5 +61,5 @@ the wallet and connect it again.
 **"queue-full — resending"** — normal. The network limits how many messages an
 account can send at once; the app waits and retries on its own.
 
-**Mining stopped on its own** — the screen almost certainly turned off. See
-*Keep it mining*.
+**Mining stopped on its own** — usually the battery-optimisation permission was
+never granted. See *Keep it mining*.
