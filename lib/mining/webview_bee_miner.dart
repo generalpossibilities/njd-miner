@@ -552,8 +552,19 @@ class WebViewBeeMiner implements BeeMiner {
         }
         break;
       case 'disconnected':
-        unawaited(refreshWallets());
-        _set(const MinerState(phase: MinerPhase.needsWallet));
+        // Only fall back to the connect screen when nothing is left. Resetting
+        // unconditionally stranded the UI there whenever one of several wallets
+        // was removed — the remaining wallets were still connected and mining,
+        // but there was no way back to them without restarting the app.
+        final remaining = (raw['remaining'] as num?)?.toInt() ?? 0;
+        if (remaining > 0) {
+          _selectedWalletId = null; // re-picked from the refreshed list
+          unawaited(refreshWallets());
+          _set(_state.copyWith(phase: MinerPhase.idle, sessionPhase: null));
+        } else {
+          unawaited(refreshWallets());
+          _set(const MinerState(phase: MinerPhase.needsWallet));
+        }
         break;
     }
   }

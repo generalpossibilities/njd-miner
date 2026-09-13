@@ -205,26 +205,25 @@ class _WalletSheetState extends State<WalletSheet> {
     );
   }
 
-  /// Wallet picker + controls for the selected wallet.
+  /// The connected wallets, each with its own start/stop control.
   ///
-  /// Several wallets mine at once, so the figures below belong to whichever is
-  /// picked here — without that the numbers would look like they covered all.
-  ///
-  /// A dropdown rather than a list: the list grew a row per wallet and pushed
-  /// the balances, controls and log off the bottom of the sheet once a handful
-  /// were connected. A dropdown is a fixed height whatever the wallet count.
+  /// A list again rather than a dropdown: per-wallet control is the point, and
+  /// burying it one tap deep behind a picker made the common action — start or
+  /// stop *that* wallet — harder than it should be. The reason the list was
+  /// replaced in the first place was that it grew without limit and pushed the
+  /// rest of the sheet off screen; that is fixed by bounding its height and
+  /// letting it scroll internally instead, so the balances, controls and log
+  /// below stay put however many wallets are connected.
   Widget _walletList() {
     final wallets = widget.miner.wallets;
     final selectedId = widget.miner.selectedWalletId;
     if (wallets.isEmpty) return const SizedBox.shrink();
 
+    final anyMining = wallets.any((w) => w['mining'] == true);
     final selected = wallets.firstWhere(
       (w) => w['walletId'] == selectedId,
       orElse: () => wallets.first,
     );
-    final mining = selected['mining'] == true;
-    final keysReady = selected['keysReady'] == true;
-    final anyMining = wallets.any((w) => w['mining'] == true);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -249,105 +248,136 @@ class _WalletSheetState extends State<WalletSheet> {
             ),
           ],
         ),
-        const SizedBox(height: 4),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: '${selected['walletId']}',
-              isExpanded: true,
-              dropdownColor: const Color(0xFF1B1C1F),
-              iconEnabledColor: Colors.white38,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              onChanged: _busy
-                  ? null
-                  : (id) async {
-                      if (id == null || id == selectedId) return;
-                      setState(() => _busy = true);
-                      try {
-                        await widget.miner.selectWallet(id);
-                      } finally {
-                        if (mounted) setState(() => _busy = false);
-                      }
-                    },
-              items: [
-                for (final w in wallets)
-                  DropdownMenuItem<String>(
-                    value: '${w['walletId']}',
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${w['walletName'] ?? 'wallet'}',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        // Status travels with each entry, so the picker answers
-                        // "which of mine are running?" without opening each.
-                        if (w['keysReady'] != true)
-                          const _Chip(
-                            text: 'keys pending',
-                            color: Colors.orangeAccent,
-                          )
-                        else if (w['mining'] == true)
-                          const _Chip(text: 'mining', color: Color(0xFF6BE28B))
-                        else
-                          const _Chip(text: 'idle', color: Colors.white38),
-                      ],
-                    ),
-                  ),
-              ],
+        ConstrainedBox(
+          // ~4 rows, then it scrolls. Fixed ceiling is what stops a long wallet
+          // list from displacing everything under it.
+          constraints: const BoxConstraints(maxHeight: 184),
+          child: Scrollbar(
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              itemCount: wallets.length,
+              itemBuilder: (_, i) =>
+                  _walletRow(wallets[i], wallets[i]['walletId'] == selectedId),
             ),
           ),
         ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            // Start/stop acts on the wallet in the picker; the others are
-            // untouched.
-            if (keysReady)
-              OutlinedButton.icon(
-                onPressed: _busy
-                    ? null
-                    : () => _setMining(
-                        '${selected['walletId']}',
-                        start: !mining,
-                      ),
-                icon: Icon(
-                  mining
-                      ? Icons.stop_circle_outlined
-                      : Icons.play_circle_outline,
-                  size: 16,
-                ),
-                label: Text(mining ? 'Stop' : 'Start'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: mining
-                      ? Colors.redAccent
-                      : const Color(0xFF6BE28B),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-            if (wallets.length > 1) ...[
-              const SizedBox(width: 8),
+        if (wallets.length > 1) ...[
+          const SizedBox(height: 6),
+          Row(
+            children: [
               TextButton(
-                onPressed: _busy ? null : () => _setMining(null, start: !anyMining),
+                onPressed: _busy ? null : () => _setMining(null, start: true),
                 style: TextButton.styleFrom(
-                  foregroundColor: Colors.white54,
+                  foregroundColor: const Color(0xFF6BE28B),
                   visualDensity: VisualDensity.compact,
                 ),
-                child: Text(anyMining ? 'Stop all' : 'Start all'),
+                child: const Text('Start all'),
+              ),
+              TextButton(
+                onPressed: _busy || !anyMining
+                    ? null
+                    : () => _setMining(null, start: false),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.redAccent,
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('Stop all'),
+              ),
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  // The figures below belong to one wallet; with several
+                  // connected it is otherwise impossible to tell whose.
+                  'Showing ${selected['walletName'] ?? 'wallet'}',
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(color: Colors.white30, fontSize: 10),
+                ),
               ),
             ],
-          ],
-        ),
+          ),
+        ],
         const Divider(color: Colors.white12, height: 20),
       ],
+    );
+  }
+
+  Widget _walletRow(Map<String, dynamic> w, bool isSelected) {
+    final mining = w['mining'] == true;
+    final keysReady = w['keysReady'] == true;
+    final id = '${w['walletId']}';
+
+    return InkWell(
+      onTap: _busy || isSelected
+          ? null
+          : () async {
+              setState(() => _busy = true);
+              try {
+                await widget.miner.selectWallet(id);
+              } finally {
+                if (mounted) setState(() => _busy = false);
+              }
+            },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Icon(
+              isSelected
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked,
+              size: 15,
+              color: isSelected ? const Color(0xFFFFC531) : Colors.white24,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${w['walletName'] ?? 'wallet'}',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.white54,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            if (!keysReady)
+              const _Chip(text: 'keys pending', color: Colors.orangeAccent)
+            else if (mining)
+              const _Chip(text: 'mining', color: Color(0xFF6BE28B))
+            else
+              const _Chip(text: 'idle', color: Colors.white38),
+            // Start/stop sits on the row it acts on, so controlling a wallet
+            // never means selecting it first.
+            SizedBox(
+              width: 36,
+              child: keysReady
+                  ? IconButton(
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 32,
+                      ),
+                      tooltip: mining ? 'Stop this wallet' : 'Start this wallet',
+                      icon: Icon(
+                        mining
+                            ? Icons.stop_circle_outlined
+                            : Icons.play_circle_outline,
+                        size: 20,
+                        color: mining
+                            ? Colors.redAccent
+                            : const Color(0xFF6BE28B),
+                      ),
+                      onPressed: _busy
+                          ? null
+                          : () => _setMining(id, start: !mining),
+                    )
+                  : null,
+            ),
+          ],
+        ),
+      ),
     );
   }
 

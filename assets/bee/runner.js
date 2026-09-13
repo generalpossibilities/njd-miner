@@ -939,6 +939,9 @@ window.Bee = {
 
   async stopMining(targetId = null) {
     const targets = targetId ? [M.wallets.get(targetId)].filter(Boolean) : allWallets();
+
+    // Stop everything first, and return. Stopping must be instant: the caller
+    // awaits this and blocks its UI on it.
     for (const W of targets) {
       W.running = false;
       try {
@@ -946,10 +949,15 @@ window.Bee = {
       } catch (e) {
         log("stop error", String(e?.message || e));
       }
-      // Claim before letting go. get_reward otherwise only ever runs inside the
-      // session loop, so a wallet stopped after earning kept whatever it had
-      // accrued until it was started again.
-      await claimIfDue(W);
+    }
+
+    // Then claim in the background. get_reward only ever runs inside the session
+    // loop, so a wallet stopped after earning would hold what it accrued until
+    // started again — but claiming is a chain round-trip per wallet through the
+    // serialised tx() queue, so awaiting it here froze "Stop all" for as long as
+    // every wallet's claim took.
+    for (const W of targets) {
+      claimIfDue(W).catch(() => {});
     }
   },
 
