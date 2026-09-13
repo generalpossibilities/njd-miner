@@ -262,6 +262,11 @@ abstract class BeeMiner {
   /// Recent runner log lines, newest last.
   List<String> get logLines => const [];
 
+  /// True while any wallet is mining. [MinerState.isMining] describes only the
+  /// wallet the UI is showing, so anything that must hold for the whole app —
+  /// the foreground service and its wake lock — has to use this instead.
+  bool get anyMining => false;
+
   /// Drop everything currently in [logLines].
   void clearLog() {}
 

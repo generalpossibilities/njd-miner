@@ -69,6 +69,14 @@ class WebViewBeeMiner implements BeeMiner {
   /// once and each emits its own session events, so events carrying a different
   /// walletId are ignored here rather than interleaved into one state — that
   /// would make counters jump between wallets.
+  /// True while *any* wallet is mining, as opposed to [MinerState.isMining]
+  /// which describes only the wallet the UI is showing. The foreground service
+  /// must follow this one, or stopping one wallet drops the wake lock out from
+  /// under the others.
+  bool _anyMining = false;
+  @override
+  bool get anyMining => _anyMining;
+
   String? _selectedWalletId;
   @override
   String? get selectedWalletId => _selectedWalletId;
@@ -433,10 +441,25 @@ class WebViewBeeMiner implements BeeMiner {
         );
         break;
       case 'mining_started':
-        _set(_state.copyWith(phase: MinerPhase.mining, error: null));
+        _anyMining = true;
+        // phase describes the wallet the UI is showing, so only move it for
+        // that one. Another wallet starting must not make an idle selection
+        // look like it is mining.
+        if (!_isOtherWallet(raw)) {
+          _set(_state.copyWith(phase: MinerPhase.mining, error: null));
+        } else {
+          _set(_state);
+        }
         break;
       case 'mining_stopped':
-        _set(_state.copyWith(phase: MinerPhase.idle, sessionPhase: 'idle'));
+        // anyMining is computed across every wallet by the runner: one loop
+        // ending is not mining stopping.
+        _anyMining = raw['anyMining'] == true;
+        if (!_isOtherWallet(raw)) {
+          _set(_state.copyWith(phase: MinerPhase.idle, sessionPhase: 'idle'));
+        } else {
+          _set(_state);
+        }
         break;
       case 'session':
         if (_isOtherWallet(raw)) break;

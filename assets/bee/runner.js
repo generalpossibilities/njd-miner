@@ -408,10 +408,23 @@ async function claimIfDue(W) {
   }
 }
 
+/** True while any wallet's loop is still going. */
+function anyMining() {
+  return allWallets().some((W) => W.loopAlive || W.running);
+}
+
 async function runSessionLoop(W) {
   if (W.loopAlive) return;
   W.loopAlive = true;
-  emit("mining_started");
+  // Says which wallet, and whether *any* is still mining. Unqualified, these
+  // events made one wallet's loop ending look like mining had stopped
+  // altogether — which tore down the foreground service and its wake lock while
+  // other wallets were still running.
+  emit("mining_started", {
+    walletId: walletId(W.conn),
+    walletName: W.conn?.walletName || null,
+    anyMining: true,
+  });
 
   const cfg = CFG();
   const TAP_INT = cfg.tapIntervalMs;
@@ -682,7 +695,11 @@ async function runSessionLoop(W) {
 
   dropMiner();
   W.loopAlive = false;
-  emit("mining_stopped");
+  emit("mining_stopped", {
+    walletId: walletId(W.conn),
+    walletName: W.conn?.walletName || null,
+    anyMining: anyMining(),
+  });
 }
 
 // ---- public API (window.Bee) ---------------------------------------

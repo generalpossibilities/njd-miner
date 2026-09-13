@@ -77,7 +77,10 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
   bool _serviceRunning = false;
 
   Future<void> _syncForegroundService(MinerState s) async {
-    if (s.isMining) {
+    // anyMining, not s.isMining: the latter describes only the wallet the UI is
+    // showing, so stopping that one would tear the service down — and its wake
+    // lock — while other wallets were still mining.
+    if (widget.miner.anyMining) {
       if (!_serviceRunning) {
         _serviceRunning = true;
         await MiningForegroundService.start(status: _notificationText(s));
@@ -223,9 +226,13 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
                 state: _miner,
                 onConnectWallet: _openWalletSheet,
                 onToggleMining: () {
-                  if (_miner.isMining) {
+                  // This button acts on every wallet, so it reads anyMining
+                  // rather than the selected wallet's phase — otherwise with
+                  // one wallet idle and another mining it showed "start" and
+                  // then started all of them.
+                  if (widget.miner.anyMining) {
                     widget.miner.stopMining();
-                  } else if (_miner.phase == MinerPhase.idle) {
+                  } else {
                     widget.miner.startMining();
                   }
                 },
