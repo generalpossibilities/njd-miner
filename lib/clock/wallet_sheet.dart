@@ -266,16 +266,22 @@ class _WalletSheetState extends State<WalletSheet> {
                   style: TextStyle(color: Colors.white38, fontSize: 10),
                 );
               }
-              // Newest first: the interesting line is almost always the last
-              // thing that happened, and this panel is short.
-              final shown = lines.reversed.toList();
+              // Chronological top-to-bottom, pinned to the newest line.
+              //
+              // `reverse: true` builds from the bottom up, so index 0 sits at
+              // the bottom: feeding it the list backwards puts the oldest line
+              // at the top and the newest at the bottom, and the view opens
+              // already scrolled to the latest. Rendering newest-first instead
+              // made a session read backwards — the summary above the work that
+              // produced it.
               return ListView.builder(
                 padding: EdgeInsets.zero,
-                itemCount: shown.length,
+                reverse: true,
+                itemCount: lines.length,
                 itemBuilder: (_, i) => Padding(
                   padding: const EdgeInsets.only(bottom: 2),
                   child: Text(
-                    shown[i],
+                    lines[lines.length - 1 - i],
                     style: const TextStyle(
                       color: Colors.white60,
                       fontSize: 10,

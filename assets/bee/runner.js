@@ -263,6 +263,28 @@ function emitSession(phase, extra = {}) {
   });
 }
 
+/** Claim the reward if the epoch has rolled since the last claim.
+ *
+ *  Only uses a Miner instance that already exists. Building one costs a
+ *  getDetails and possibly a cancel_session — an external message against the
+ *  per-account cap — too much to spend when there may be nothing to claim.
+ */
+async function claimIfDue() {
+  const miner = M.currentMiner;
+  if (!miner) return;
+  try {
+    const d = await miner.get_miner_data();
+    const epoch5m = d?.epoch_5m_start?.toString() ?? null;
+    d?.free?.();
+    if (epoch5m != null && epoch5m === M.lastRewardEpoch5m) return; // already claimed
+    await tx(() => miner.get_reward());
+    M.lastRewardEpoch5m = epoch5m;
+    logMsg("get_reward sent (on stop)");
+  } catch (e) {
+    logMsg("get_reward on stop failed:", String(e?.message || e));
+  }
+}
+
 async function runSessionLoop() {
   if (M.loopAlive) return;
   M.loopAlive = true;
@@ -686,6 +708,10 @@ window.Bee = {
     } catch (e) {
       log("stop error", String(e?.message || e));
     }
+    // Claim before letting go. get_reward otherwise only ever runs inside the
+    // session loop, so stopping after earning kept whatever had accrued until
+    // mining was started again.
+    await claimIfDue();
   },
 
   /** Optional bonus tap from a real touch on the clock face. Only lands if a
