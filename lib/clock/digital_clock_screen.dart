@@ -58,7 +58,7 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
     _sub = widget.miner.states.listen((s) {
       setState(() => _miner = s);
       HomeWidgetBridge.update(s);
-      MiningForegroundService.updateStatus(status: _notificationText(s));
+      _syncForegroundService(s);
 
       // Deliberately does not start mining when keys finish propagating.
       // Mining begins only when the user asks for it — from the Start button
@@ -68,10 +68,31 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
     _boot();
   }
 
+  /// Run the foreground service only while something is actually mining.
+  ///
+  /// It used to start at launch and stay up for the app's lifetime, so with
+  /// nothing mining — now the default, since mining no longer auto-starts —
+  /// there was a permanent notification claiming work that was not happening,
+  /// holding a wake lock for nothing.
+  bool _serviceRunning = false;
+
+  Future<void> _syncForegroundService(MinerState s) async {
+    if (s.isMining) {
+      if (!_serviceRunning) {
+        _serviceRunning = true;
+        await MiningForegroundService.start(status: _notificationText(s));
+      } else {
+        await MiningForegroundService.updateStatus(status: _notificationText(s));
+      }
+    } else if (_serviceRunning) {
+      _serviceRunning = false;
+      await MiningForegroundService.stop();
+    }
+  }
+
   Future<void> _boot() async {
     try {
       await MiningForegroundService.ensurePermissions();
-      await MiningForegroundService.start(status: 'Starting…');
       await widget.miner.initialize();
       if (!mounted) return;
       // No auto-start on launch: a stored wallet is not a request to mine.

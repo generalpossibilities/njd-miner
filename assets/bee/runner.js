@@ -385,6 +385,29 @@ function emitSession(W, phase, extra = {}) {
 // polling is the shared resource: each Miner spawns its own poll thread, which
 // is why this branch ships the 10s-poll WASM rather than the 2.5s single-wallet
 // build.
+/** Claim this wallet's reward if the epoch has rolled since its last claim.
+ *
+ *  Only uses a Miner instance that already exists. Building one costs a
+ *  getDetails and possibly a cancel_session — an external message against the
+ *  per-account cap — which is too much to spend on a wallet that may have
+ *  nothing to claim.
+ */
+async function claimIfDue(W) {
+  const miner = W?.currentMiner;
+  if (!miner) return;
+  try {
+    const d = await miner.get_miner_data();
+    const epoch5m = d?.epoch_5m_start?.toString() ?? null;
+    d?.free?.();
+    if (epoch5m != null && epoch5m === W.lastRewardEpoch5m) return; // already claimed
+    await tx(() => miner.get_reward());
+    W.lastRewardEpoch5m = epoch5m;
+    logW(W, "get_reward sent (on stop)");
+  } catch (e) {
+    logW(W, "get_reward on stop failed:", String(e?.message || e));
+  }
+}
+
 async function runSessionLoop(W) {
   if (W.loopAlive) return;
   W.loopAlive = true;
@@ -906,6 +929,10 @@ window.Bee = {
       } catch (e) {
         log("stop error", String(e?.message || e));
       }
+      // Claim before letting go. get_reward otherwise only ever runs inside the
+      // session loop, so a wallet stopped after earning kept whatever it had
+      // accrued until it was started again.
+      await claimIfDue(W);
     }
   },
 
