@@ -114,6 +114,14 @@ class _OverlayClockState extends State<OverlayClock> {
     });
 
     _link = FlutterOverlayWindow.overlayListener.listen((event) {
+      if (event is Map && event['type'] == OverlayMsg.mainYielded) {
+        // The main app has stood down. Continue its mining only if it was
+        // actually mining.
+        if (event['wasMining'] == true && _state.phase == MinerPhase.idle) {
+          _miner.startMining().catchError((_) {});
+        }
+        return;
+      }
       if (event is Map && event['type'] == OverlayMsg.mainResumed) {
         _miner.stopMining();
       }
@@ -136,13 +144,13 @@ class _OverlayClockState extends State<OverlayClock> {
     try {
       await _miner.initialize();
       if (!mounted) return;
-      // Tell the main app to yield, then take over mining.
+      // Tell the main app to yield. Whether we then mine depends on its reply:
+      // it answers mainYielded with wasMining, and the overlay takes over only
+      // if mining was actually running. Showing the clock is not a request to
+      // start mining.
       await FlutterOverlayWindow.shareData(
         OverlayMsg.of(OverlayMsg.overlayMining),
       );
-      if (_miner.state.phase == MinerPhase.idle) {
-        await _miner.startMining();
-      }
     } catch (_) {
       if (mounted) setState(() => _displayOnly = true);
     }
@@ -184,7 +192,7 @@ class _OverlayClockState extends State<OverlayClock> {
         }),
       );
     } else {
-      if (_state.phase == MinerPhase.idle) _miner.startMining();
+      // A tap adds a tap; it does not start mining that was never asked for.
       _miner.addTap(d.localPosition.dx, d.localPosition.dy);
     }
   }

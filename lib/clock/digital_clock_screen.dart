@@ -56,17 +56,13 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
 
     _miner = widget.miner.state;
     _sub = widget.miner.states.listen((s) {
-      final wasSettingUp =
-          _miner.phase == MinerPhase.propagatingKeys ||
-          _miner.phase == MinerPhase.needsMiningKeys;
       setState(() => _miner = s);
       HomeWidgetBridge.update(s);
       MiningForegroundService.updateStatus(status: _notificationText(s));
 
-      // Keys just propagated → auto-mining kicks off.
-      if (wasSettingUp && s.phase == MinerPhase.idle) {
-        widget.miner.startMining();
-      }
+      // Deliberately does not start mining when keys finish propagating.
+      // Mining begins only when the user asks for it — from the Start button
+      // here, or per-wallet in the sheet.
     });
 
     _boot();
@@ -78,10 +74,8 @@ class _DigitalClockScreenState extends State<DigitalClockScreen> {
       await MiningForegroundService.start(status: 'Starting…');
       await widget.miner.initialize();
       if (!mounted) return;
-      // If a wallet + keys are already stored, start mining immediately.
-      if (widget.miner.state.phase == MinerPhase.idle) {
-        await widget.miner.startMining();
-      } else if (widget.miner.state.phase == MinerPhase.needsWallet) {
+      // No auto-start on launch: a stored wallet is not a request to mine.
+      if (widget.miner.state.phase == MinerPhase.needsWallet) {
         _openWalletSheet();
       }
     } catch (e) {

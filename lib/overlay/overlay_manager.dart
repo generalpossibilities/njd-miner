@@ -47,6 +47,11 @@ class OverlayManager extends ChangeNotifier {
   bool _active = false;
   bool _overlayIsMining = false;
 
+  /// Whether the main app was mining when the overlay took over. The handoff
+  /// has to carry intent: the overlay must not start mining the user never
+  /// asked for, and closing it must not start mining either.
+  bool _mainWasMining = false;
+
   bool get active => _active;
 
   /// Persisted "the user turned it off" flag. The floating clock is on by
@@ -122,11 +127,15 @@ class OverlayManager extends ChangeNotifier {
     await FlutterOverlayWindow.closeOverlay();
     _active = false;
     _overlayIsMining = false;
-    // Resume mining in the main app.
     await FlutterOverlayWindow.shareData(OverlayMsg.of(OverlayMsg.mainResumed));
-    try {
-      await _miner.startMining();
-    } catch (_) {}
+    // Resume in the main app only if it was mining when the overlay took over.
+    // Restarting unconditionally would turn closing the clock into a way to
+    // start mining nobody asked for.
+    if (_mainWasMining) {
+      try {
+        await _miner.startMining();
+      } catch (_) {}
+    }
     notifyListeners();
   }
 
@@ -137,14 +146,20 @@ class OverlayManager extends ChangeNotifier {
         _overlayIsMining = true;
         overlayTaps = (event['taps'] as num?)?.toInt() ?? overlayTaps;
         overlayBalance = event['balance']?.toString() ?? overlayBalance;
-        // Overlay owns mining now — stand down.
+        // Remember whether we were actually mining before standing down, so the
+        // handoff preserves intent in both directions, and tell the overlay so
+        // it does not start mining on its own either.
+        _mainWasMining = _miner.state.phase == MinerPhase.mining;
+        FlutterOverlayWindow.shareData(
+          OverlayMsg.of(OverlayMsg.mainYielded, {'wasMining': _mainWasMining}),
+        );
         _miner.stopMining().catchError((_) {});
         notifyListeners();
         break;
       case OverlayMsg.overlayDisplayOnly:
         _overlayIsMining = false;
-        // Main app stays the miner; make sure it's running.
-        _miner.startMining().catchError((_) {});
+        // Main app stays the miner — but only resume if it was mining.
+        if (_mainWasMining) _miner.startMining().catchError((_) {});
         notifyListeners();
         break;
       case OverlayMsg.overlayTap:
@@ -155,7 +170,7 @@ class OverlayManager extends ChangeNotifier {
       case OverlayMsg.overlayClosed:
         _active = false;
         _overlayIsMining = false;
-        _miner.startMining().catchError((_) {});
+        if (_mainWasMining) _miner.startMining().catchError((_) {});
         notifyListeners();
         break;
     }
